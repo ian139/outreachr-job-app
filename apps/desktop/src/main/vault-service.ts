@@ -13,6 +13,7 @@ import {
   OutreachrRepository,
   restoreEncryptedBackup,
   verifyAuditChain,
+  type ApplicationDraftRecord,
   type CoreVault,
 } from '@outreachr/core';
 import { openNodeVault } from '@outreachr/core/node';
@@ -25,9 +26,16 @@ import type {
   AgentProposalReviewResult,
   AgentStatus,
   AppBootstrap,
+  ApplicationDetail,
+  ApplicationNote,
+  ApplicationStage,
+  ApplicationTask,
+  CommandMap,
   CommandResultMap,
+  Company,
   Confidence,
   ConnectorStatus,
+  Contact,
   DraftMessage,
   FounderSetupInput,
   InvestorDetail,
@@ -1626,6 +1634,13 @@ export class VaultService {
       suppressions: this.#suppressions(),
       communicationPolicy: this.#communicationPolicy(),
       auditIntegrity: this.auditIntegrity(),
+      workspaceProfile: this.#vault.scalar('SELECT id FROM workspace_profile')
+        ? this.#repository.workspaceProfile()
+        : null,
+      companies: this.#repository.listCompanies(),
+      contacts: this.#repository.listContacts(),
+      applicationStages: this.#repository.listApplicationStages(),
+      applications: this.#repository.listJobApplications({ limit: 100 }).applications,
       counts: {
         firms: investors.length,
         people: people.length,
@@ -2950,6 +2965,196 @@ export class VaultService {
     this.#repository.approveMessage(id, this.#now().toISOString());
     await this.persist();
     return this.#drafts(this.#allPeople()).find((draft) => draft.id === id)!;
+  }
+
+  // ---- Job application workspace and lifecycle ----
+
+  async setupWorkspace(input: CommandMap['workspace.setup']): Promise<AppBootstrap> {
+    const now = this.#now().toISOString();
+    this.#repository.setupWorkspace(input, now);
+    await this.persist();
+    return this.bootstrap();
+  }
+
+  async createCompany(input: CommandMap['company.create']): Promise<Company> {
+    const now = this.#now().toISOString();
+    const company = this.#repository.createCompany(input, now);
+    await this.persist();
+    return company;
+  }
+
+  async updateCompany(input: CommandMap['company.update']): Promise<Company> {
+    const now = this.#now().toISOString();
+    const company = this.#repository.updateCompany(input, now);
+    await this.persist();
+    return company;
+  }
+
+  async createContact(input: CommandMap['contact.create']): Promise<Contact> {
+    const now = this.#now().toISOString();
+    const contact = this.#repository.createContact(input, now);
+    await this.persist();
+    return contact;
+  }
+
+  async updateContact(input: CommandMap['contact.update']): Promise<Contact> {
+    const now = this.#now().toISOString();
+    const contact = this.#repository.updateContact(input, now);
+    await this.persist();
+    return contact;
+  }
+
+  async createApplicationStage(
+    input: CommandMap['applicationStage.create'],
+  ): Promise<ApplicationStage> {
+    const now = this.#now().toISOString();
+    const stage = this.#repository.createApplicationStage(input, now);
+    await this.persist();
+    return stage;
+  }
+
+  async updateApplicationStage(
+    input: CommandMap['applicationStage.update'],
+  ): Promise<ApplicationStage> {
+    const now = this.#now().toISOString();
+    const stage = this.#repository.updateApplicationStage(input, now);
+    await this.persist();
+    return stage;
+  }
+
+  async setApplicationStageTransition(
+    input: CommandMap['applicationStage.transition.set'],
+  ): Promise<{ allowed: boolean }> {
+    const now = this.#now().toISOString();
+    const result = this.#repository.setApplicationStageTransition(input, now);
+    await this.persist();
+    return result;
+  }
+
+  async createJobApplication(
+    input: CommandMap['application.create'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.createJobApplication(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async getJobApplication(id: string): Promise<ApplicationDetail> {
+    return this.#repository.getJobApplication(id);
+  }
+
+  async listJobApplications(
+    input: CommandMap['application.list'],
+  ): Promise<CommandResultMap['application.list']> {
+    return this.#repository.listJobApplications(input);
+  }
+
+  async updateJobApplication(
+    input: CommandMap['application.update'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.updateJobApplication(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async transitionJobApplication(
+    input: CommandMap['application.transition'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.transitionJobApplication(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async linkApplicationContact(
+    input: CommandMap['application.contact.link'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.linkApplicationContact(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async unlinkApplicationContact(
+    input: CommandMap['application.contact.unlink'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.unlinkApplicationContact(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async linkApplicationThread(
+    input: CommandMap['application.thread.link'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.linkApplicationThread(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async unlinkApplicationThread(
+    input: CommandMap['application.thread.unlink'],
+  ): Promise<ApplicationDetail> {
+    const now = this.#now().toISOString();
+    const detail = this.#repository.unlinkApplicationThread(input, now);
+    await this.persist();
+    return detail;
+  }
+
+  async createApplicationNote(
+    input: CommandMap['application.note.create'],
+  ): Promise<ApplicationNote> {
+    const now = this.#now().toISOString();
+    const note = this.#repository.createApplicationNote(input, now);
+    await this.persist();
+    return note;
+  }
+
+  async updateApplicationNote(
+    input: CommandMap['application.note.update'],
+  ): Promise<ApplicationNote> {
+    const now = this.#now().toISOString();
+    const note = this.#repository.updateApplicationNote(input, now);
+    await this.persist();
+    return note;
+  }
+
+  async createApplicationTask(
+    input: CommandMap['application.task.create'],
+  ): Promise<ApplicationTask> {
+    const now = this.#now().toISOString();
+    const task = this.#repository.createApplicationTask(input, now);
+    await this.persist();
+    return task;
+  }
+
+  async updateApplicationTask(
+    input: CommandMap['application.task.update'],
+  ): Promise<ApplicationTask> {
+    const now = this.#now().toISOString();
+    const task = this.#repository.updateApplicationTask(input, now);
+    await this.persist();
+    return task;
+  }
+
+  async createApplicationDraft(input: {
+    applicationId: string;
+    contactId: string;
+    provider: 'google' | 'microsoft';
+    accountEmail: string;
+    kind: 'initial' | 'reply';
+    subject: string;
+    bodyText: string;
+    threadId?: string | null;
+    replyToMessageId?: string | null;
+  }): Promise<ApplicationDraftRecord> {
+    const now = this.#now().toISOString();
+    const draft = this.#repository.createApplicationDraft(input, now);
+    await this.persist();
+    return draft;
   }
 
   async exportBackup(directory: string, password: string): Promise<string> {

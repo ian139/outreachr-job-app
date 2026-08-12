@@ -196,14 +196,43 @@ const commandSchemas: Record<keyof CommandMap, z.ZodType> = {
     description: z.string().max(20_000).nullable(),
     memberFirmIds: z.array(id).max(1_000),
   }),
-  'draft.create': z.object({
-    personId: id,
-    provider,
-    kind: z.enum(['initial', 'follow_up', 'intro_request', 'reply']),
-    subject: z.string().trim().min(1).max(998),
-    bodyText: z.string().min(1).max(500_000),
-    threadId: z.string().trim().min(1).max(2_000).nullable().optional(),
-  }),
+  'draft.create': z.union([
+    z.object({
+      personId: id,
+      provider,
+      kind: z.enum(['initial', 'follow_up', 'intro_request', 'reply']),
+      subject: z.string().trim().min(1).max(998),
+      bodyText: z.string().min(1).max(500_000),
+      threadId: z.string().trim().min(1).max(2_000).nullable().optional(),
+    }),
+    z
+      .object({
+        applicationId: id,
+        contactId: id,
+        provider,
+        accountEmail: z.string().trim().email().max(320),
+        kind: z.enum(['initial', 'reply']),
+        subject: z.string().trim().min(1).max(998),
+        bodyText: z.string().min(1).max(500_000),
+        threadId: z.string().trim().min(1).max(2_000).nullable().optional(),
+        replyToMessageId: z.string().trim().min(1).max(2_000).nullable().optional(),
+      })
+      .superRefine((draft, context) => {
+        if (draft.kind === 'reply' && !draft.threadId) {
+          context.addIssue({
+            code: 'custom',
+            path: ['threadId'],
+            message: 'A reply draft requires a provider thread',
+          });
+        }
+        if (draft.kind === 'initial' && (draft.threadId || draft.replyToMessageId)) {
+          context.addIssue({
+            code: 'custom',
+            message: 'An initial draft cannot be attached to a provider thread or message',
+          });
+        }
+      }),
+  ]),
   'draft.update': z.object({
     id,
     subject: z.string().trim().min(1).max(998).optional(),
@@ -278,6 +307,139 @@ const commandSchemas: Record<keyof CommandMap, z.ZodType> = {
   'agent.proposal.review': z.object({
     id,
     decision: z.enum(['apply', 'reject', 'convert_to_task']),
+  }),
+  'workspace.setup': z.object({
+    displayName: z.string().trim().min(1).max(300),
+    primaryEmail: z.string().trim().email().max(320),
+    stages: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(200),
+          terminal: z.boolean().default(false),
+        }),
+      )
+      .min(1)
+      .max(32),
+  }),
+  'company.create': z.object({
+    name: z.string().trim().min(1).max(500),
+    website: z.string().trim().url().max(4_096).nullable().optional(),
+    location: z.string().trim().max(1_000).nullable().optional(),
+  }),
+  'company.update': z.object({
+    id,
+    name: z.string().trim().min(1).max(500),
+    website: z.string().trim().url().max(4_096).nullable(),
+    location: z.string().trim().max(1_000).nullable(),
+  }),
+  'contact.create': z.object({
+    companyId: id.nullable(),
+    name: z.string().trim().min(1).max(500),
+    title: z.string().trim().max(500).nullable(),
+    primaryEmail: z.string().trim().email().max(320).nullable(),
+  }),
+  'contact.update': z.object({
+    id,
+    companyId: id.nullable(),
+    name: z.string().trim().min(1).max(500),
+    title: z.string().trim().max(500).nullable(),
+    primaryEmail: z.string().trim().email().max(320).nullable(),
+  }),
+  'applicationStage.create': z.object({
+    name: z.string().trim().min(1).max(200),
+    position: z.number().int().min(0).max(31),
+    terminal: z.boolean(),
+  }),
+  'applicationStage.update': z.object({
+    id,
+    name: z.string().trim().min(1).max(200),
+    position: z.number().int().min(0).max(31),
+    terminal: z.boolean(),
+    archived: z.boolean(),
+  }),
+  'applicationStage.transition.set': z
+    .object({
+      fromStageId: id,
+      toStageId: id,
+      allowed: z.boolean(),
+    })
+    .superRefine((transition, context) => {
+      if (transition.fromStageId === transition.toStageId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['toStageId'],
+          message: 'A stage cannot transition to itself',
+        });
+      }
+    }),
+  'application.create': z.object({
+    companyId: id,
+    role: z.string().trim().min(1).max(2_000),
+    stageId: id,
+    sourceUrl: z.string().trim().url().max(4_096).nullable().optional(),
+    appliedAt: nullableIso.optional(),
+    nextEventAt: nullableIso.optional(),
+  }),
+  'application.get': z.object({ id }),
+  'application.list': z.object({
+    query: z.string().trim().max(500).optional(),
+    stageIds: z.array(id).max(100).optional(),
+    companyId: id.optional(),
+    taskStatus: z.enum(['open', 'done', 'dismissed']).optional(),
+    limit: z.number().int().min(1).max(100),
+    cursor: z.string().trim().min(1).max(500).optional(),
+  }),
+  'application.update': z.object({
+    id,
+    companyId: id.optional(),
+    role: z.string().trim().min(1).max(2_000).optional(),
+    sourceUrl: z.string().trim().url().max(4_096).nullable().optional(),
+    appliedAt: nullableIso.optional(),
+    nextEventAt: nullableIso.optional(),
+  }),
+  'application.transition': z.object({
+    id,
+    toStageId: id,
+    note: z.string().trim().max(10_000).nullable().optional(),
+  }),
+  'application.contact.link': z.object({
+    applicationId: id,
+    contactId: id,
+    relationship: z.string().trim().min(1).max(500),
+    primary: z.boolean(),
+  }),
+  'application.contact.unlink': z.object({ applicationId: id, contactId: id }),
+  'application.thread.link': z.object({
+    applicationId: id,
+    provider,
+    accountEmail: z.string().trim().email().max(320),
+    providerThreadId: z.string().trim().min(1).max(2_000),
+    subjectSnapshot: z.string().trim().max(998).nullable().optional(),
+  }),
+  'application.thread.unlink': z.object({
+    applicationId: id,
+    provider,
+    accountEmail: z.string().trim().email().max(320),
+    providerThreadId: z.string().trim().min(1).max(2_000),
+  }),
+  'application.note.create': z.object({
+    applicationId: id,
+    body: z.string().trim().min(1).max(1_000_000),
+  }),
+  'application.note.update': z.object({ id, body: z.string().trim().min(1).max(1_000_000) }),
+  'application.task.create': z.object({
+    applicationId: id,
+    title: z.string().trim().min(1).max(2_000),
+    notes: z.string().trim().max(50_000).nullable().optional(),
+    dueAt: nullableIso.optional(),
+    status: z.enum(['open', 'done', 'dismissed']).default('open'),
+  }),
+  'application.task.update': z.object({
+    id,
+    title: z.string().trim().min(1).max(2_000).optional(),
+    notes: z.string().trim().max(50_000).nullable().optional(),
+    dueAt: nullableIso.optional(),
+    status: z.enum(['open', 'done', 'dismissed']).optional(),
   }),
   'backup.export': z.object({
     directory: z.string().min(1).max(4_096),
@@ -424,8 +586,113 @@ export class CommandService {
         case 'list.update':
           result = await this.#vault.updateList(payload as CommandMap['list.update']);
           break;
-        case 'draft.create':
-          result = await this.#vault.createDraft(payload as CommandMap['draft.create']);
+        case 'draft.create': {
+          const value = payload as CommandMap['draft.create'];
+          if ('applicationId' in value) {
+            result = await this.#vault.createApplicationDraft(
+              value as Parameters<VaultService['createApplicationDraft']>[0],
+            );
+          } else {
+            result = await this.#vault.createDraft(
+              value as Parameters<VaultService['createDraft']>[0],
+            );
+          }
+          break;
+        }
+        case 'workspace.setup':
+          result = await this.#vault.setupWorkspace(payload as CommandMap['workspace.setup']);
+          break;
+        case 'company.create':
+          result = await this.#vault.createCompany(payload as CommandMap['company.create']);
+          break;
+        case 'company.update':
+          result = await this.#vault.updateCompany(payload as CommandMap['company.update']);
+          break;
+        case 'contact.create':
+          result = await this.#vault.createContact(payload as CommandMap['contact.create']);
+          break;
+        case 'contact.update':
+          result = await this.#vault.updateContact(payload as CommandMap['contact.update']);
+          break;
+        case 'applicationStage.create':
+          result = await this.#vault.createApplicationStage(
+            payload as CommandMap['applicationStage.create'],
+          );
+          break;
+        case 'applicationStage.update':
+          result = await this.#vault.updateApplicationStage(
+            payload as CommandMap['applicationStage.update'],
+          );
+          break;
+        case 'applicationStage.transition.set':
+          result = await this.#vault.setApplicationStageTransition(
+            payload as CommandMap['applicationStage.transition.set'],
+          );
+          break;
+        case 'application.create':
+          result = await this.#vault.createJobApplication(
+            payload as CommandMap['application.create'],
+          );
+          break;
+        case 'application.get':
+          result = await this.#vault.getJobApplication(
+            (payload as CommandMap['application.get']).id,
+          );
+          break;
+        case 'application.list':
+          result = await this.#vault.listJobApplications(
+            payload as CommandMap['application.list'],
+          );
+          break;
+        case 'application.update':
+          result = await this.#vault.updateJobApplication(
+            payload as CommandMap['application.update'],
+          );
+          break;
+        case 'application.transition':
+          result = await this.#vault.transitionJobApplication(
+            payload as CommandMap['application.transition'],
+          );
+          break;
+        case 'application.contact.link':
+          result = await this.#vault.linkApplicationContact(
+            payload as CommandMap['application.contact.link'],
+          );
+          break;
+        case 'application.contact.unlink':
+          result = await this.#vault.unlinkApplicationContact(
+            payload as CommandMap['application.contact.unlink'],
+          );
+          break;
+        case 'application.thread.link':
+          result = await this.#vault.linkApplicationThread(
+            payload as CommandMap['application.thread.link'],
+          );
+          break;
+        case 'application.thread.unlink':
+          result = await this.#vault.unlinkApplicationThread(
+            payload as CommandMap['application.thread.unlink'],
+          );
+          break;
+        case 'application.note.create':
+          result = await this.#vault.createApplicationNote(
+            payload as CommandMap['application.note.create'],
+          );
+          break;
+        case 'application.note.update':
+          result = await this.#vault.updateApplicationNote(
+            payload as CommandMap['application.note.update'],
+          );
+          break;
+        case 'application.task.create':
+          result = await this.#vault.createApplicationTask(
+            payload as CommandMap['application.task.create'],
+          );
+          break;
+        case 'application.task.update':
+          result = await this.#vault.updateApplicationTask(
+            payload as CommandMap['application.task.update'],
+          );
           break;
         case 'draft.update': {
           const { id: messageId, ...values } = payload as CommandMap['draft.update'];
