@@ -1,4 +1,9 @@
-import type { EmailAddress, ListMailboxMessagesInput } from './types.js';
+import type {
+  EmailAddress,
+  GetMailboxThreadInput,
+  ListMailboxMessagesInput,
+  ListMailboxThreadsInput,
+} from './types.js';
 
 const MAX_EMAIL_LENGTH = 320;
 const MAX_ADDRESS_LIST_LENGTH = 64 * 1024;
@@ -17,6 +22,92 @@ export function validateMailboxListInput(input: ListMailboxMessagesInput): void 
   ) {
     throw new TypeError('Mailbox page size must be between 1 and 250');
   }
+}
+
+export const MAX_BODY_SIZE_BYTES = 1_048_576;
+export const MAX_CUMULATIVE_BODY_BYTES = 8 * 1_048_576;
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder('utf-8', { fatal: false });
+
+export function utf8ByteLength(str: string): number {
+  return textEncoder.encode(str).length;
+}
+
+export function truncateUtf8Bytes(
+  str: string,
+  maxBytes: number,
+): { text: string; truncated: boolean } {
+  const bytes = textEncoder.encode(str);
+  if (bytes.length <= maxBytes) {
+    return { text: str, truncated: false };
+  }
+  const sliced = bytes.subarray(0, maxBytes);
+  return { text: textDecoder.decode(sliced), truncated: true };
+}
+
+export function validateMailboxThreadListInput(input: ListMailboxThreadsInput): void {
+  if (!isProviderEmail(input.accountEmail)) {
+    throw new TypeError('Account email is invalid');
+  }
+  if (
+    input.query !== undefined &&
+    (typeof input.query !== 'string' || input.query.length > 1000 || /[\r\n]/u.test(input.query))
+  ) {
+    throw new TypeError('Query is invalid');
+  }
+  if (
+    input.pageToken !== undefined &&
+    (typeof input.pageToken !== 'string' || input.pageToken.length > 4096)
+  ) {
+    throw new TypeError('Page token is invalid');
+  }
+  if (
+    input.pageSize !== undefined &&
+    (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 50)
+  ) {
+    throw new TypeError('Mailbox thread page size must be between 1 and 50');
+  }
+}
+
+export function validateGetMailboxThreadInput(input: GetMailboxThreadInput): void {
+  if (!isProviderEmail(input.accountEmail)) {
+    throw new TypeError('Account email is invalid');
+  }
+  if (
+    !input.threadId ||
+    typeof input.threadId !== 'string' ||
+    !input.threadId.trim() ||
+    input.threadId.length > 4096 ||
+    /[\r\n]/u.test(input.threadId)
+  ) {
+    throw new TypeError('Thread ID is invalid');
+  }
+  if (
+    input.pageToken !== undefined &&
+    (typeof input.pageToken !== 'string' || input.pageToken.length > 4096)
+  ) {
+    throw new TypeError('Page token is invalid');
+  }
+  if (
+    input.pageSize !== undefined &&
+    (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 50)
+  ) {
+    throw new TypeError('Mailbox thread page size must be between 1 and 50');
+  }
+}
+
+export function deduplicateAddresses(addresses: EmailAddress[]): EmailAddress[] {
+  const seen = new Map<string, EmailAddress>();
+  for (const addr of addresses) {
+    if (!addr || typeof addr.email !== 'string') continue;
+    const key = addr.email.toLowerCase();
+    const existing = seen.get(key);
+    if (!existing || (!existing.name && addr.name)) {
+      seen.set(key, addr);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 export function parseMailboxAddresses(value: string | undefined): EmailAddress[] {

@@ -22,3 +22,16 @@ export async function sha256Base64Url(value: string): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', encoder.encode(value));
   return base64UrlEncode(new Uint8Array(digest));
 }
+
+export function base64UrlDecodeToUtf8(base64url: string): string {
+  let base64 = base64url.replaceAll('-', '+').replaceAll('_', '/');
+  while (base64.length % 4 !== 0) {
+    base64 += '=';
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}

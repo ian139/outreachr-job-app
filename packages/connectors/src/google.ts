@@ -4,14 +4,22 @@ import {
   validateFreeBusyInput,
   validateListInput,
 } from './calendar.js';
+import { base64UrlDecodeToUtf8 } from './encoding.js';
 import { ConnectorError } from './errors.js';
 import { authorizedRequest, parseJson, responseRequestId } from './http.js';
 import { buildGmailRaw } from './mime.js';
 import {
+  deduplicateAddresses,
+  MAX_BODY_SIZE_BYTES,
+  MAX_CUMULATIVE_BODY_BYTES,
   parseMailboxAddresses,
   providerEmailAddress,
   safeIsoTimestamp,
+  truncateUtf8Bytes,
+  utf8ByteLength,
+  validateGetMailboxThreadInput,
   validateMailboxListInput,
+  validateMailboxThreadListInput,
 } from './mailbox.js';
 import { executeGuardedSend } from './send.js';
 import type {
@@ -23,14 +31,21 @@ import type {
   CalendarEventPage,
   ConnectorClientOptions,
   CreateDraftInput,
+  EmailAddress,
   EmailConnector,
   EmailDraft,
   FreeBusyInput,
   FreeBusyResult,
+  GetMailboxThreadInput,
   ListCalendarEventsInput,
   ListMailboxMessagesInput,
+  ListMailboxThreadsInput,
   MailboxMessage,
+  MailboxMessageBody,
   MailboxMessagePage,
+  MailboxThread,
+  MailboxThreadMessagesPage,
+  MailboxThreadPage,
   RelationshipMailConnector,
   RetryPolicy,
   SendDraftInput,
@@ -45,12 +60,26 @@ export interface GoogleConnectorOptions extends ConnectorClientOptions {
   userId?: string;
 }
 
+interface GmailMessagePart {
+  partId?: string;
+  mimeType?: string;
+  filename?: string;
+  headers?: Array<{ name?: string; value?: string }>;
+  body?: {
+    attachmentId?: string;
+    size?: number;
+    data?: string;
+  };
+  parts?: GmailMessagePart[];
+}
+
 interface GmailMessageJson {
   id?: string;
   threadId?: string;
   internalDate?: string;
   labelIds?: string[];
-  payload?: { headers?: Array<{ name?: string; value?: string }> };
+  snippet?: string;
+  payload?: GmailMessagePart;
 }
 
 interface GmailDraftJson {
@@ -220,6 +249,168 @@ function mapGmailMessage(
     occurredAt,
     labels,
     direction: labels.includes('SENT') ? 'outbound' : 'inbound',
+  };
+}
+
+async function extractGmailBodies(
+  message: GmailMessageJson,
+  requestFn: (attachmentId: string) => Promise<{ data?: string; size?: number }>,
+  signal?: AbortSignal,
+): Promise<{ text?: string; html?: string; truncated: boolean; truncationReason?: string }> {
+  let truncated = false;
+  let truncationReason: string | undefined = undefined;
+
+  const textParts: string[] = [];
+  const htmlParts: string[] = [];
+
+  async function walk(part: GmailMessagePart | undefined, depth: number): Promise<void> {
+    if (!part || depth > 10) return;
+
+    const mimeType = (part.mimeType ?? '').toLowerCase();
+    const filename = (part.filename ?? '').trim();
+    const isAttachmentFilename = Boolean(
+      filename && !/\.(txt|text|htm|html|md|log|csv)$/i.test(filename),
+    );
+
+    if ((mimeType === 'text/plain' || mimeType === 'text/html') && !isAttachmentFilename) {
+      let content: string | undefined = undefined;
+
+      if (part.body?.data) {
+        try {
+          content = base64UrlDecodeToUtf8(part.body.data);
+        } catch {
+          content = undefined;
+        }
+      } else if (part.body?.attachmentId) {
+        const partSize = part.body.size ?? 0;
+        if (partSize > MAX_BODY_SIZE_BYTES) {
+          truncated = true;
+          truncationReason = 'Body content exceeds maximum allowed size';
+        } else {
+          try {
+            const attachment = await requestFn(part.body.attachmentId);
+            if (attachment.data) {
+              content = base64UrlDecodeToUtf8(attachment.data);
+            }
+          } catch (cause) {
+            if (signal?.aborted || (cause instanceof Error && cause.name === 'AbortError')) {
+              throw cause;
+            }
+            truncated = true;
+            truncationReason = 'Failed to fetch body attachment';
+          }
+        }
+      }
+
+      if (content !== undefined) {
+        if (mimeType === 'text/html') {
+          htmlParts.push(content);
+        } else {
+          textParts.push(content);
+        }
+      }
+    }
+
+    if (Array.isArray(part.parts)) {
+      for (const subpart of part.parts) {
+        await walk(subpart, depth + 1);
+      }
+    }
+  }
+
+  if (message.payload) {
+    await walk(message.payload, 0);
+  }
+
+  if (text) {
+    const res = truncateUtf8Bytes(text, MAX_BODY_SIZE_BYTES);
+    text = res.text;
+    if (res.truncated) {
+      truncated = true;
+      truncationReason = 'Body content exceeds maximum allowed size';
+    }
+  }
+
+  if (html) {
+    const res = truncateUtf8Bytes(html, MAX_BODY_SIZE_BYTES);
+    html = res.text;
+    if (res.truncated) {
+      truncated = true;
+      truncationReason = 'Body content exceeds maximum allowed size';
+    }
+  }
+
+  return { text, html, truncated, truncationReason };
+}
+
+function mapGmailThreadSummary(
+  threadJson: { id?: string; snippet?: string; messages?: GmailMessageJson[] },
+  accountEmail: string,
+  fallbackId: string,
+): MailboxThread | undefined {
+  const threadId = (typeof threadJson?.id === 'string' && threadJson.id.trim()) || fallbackId;
+  const messages = (threadJson?.messages ?? []).map((m) => mapGmailMessage(m)).filter(isDefined);
+  if (messages.length === 0) {
+    return {
+      provider: 'google',
+      accountEmail,
+      threadId,
+      subject: '(No subject)',
+      snippet: threadJson?.snippet ?? '',
+      participants: [],
+      latestAt: safeIsoTimestamp(Date.now())!,
+      messageCount: 0,
+      sourceUrl: `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#all/${encodeURIComponent(threadId)}`,
+    };
+  }
+
+  const allAddresses: EmailAddress[] = [];
+  for (const msg of messages) {
+    allAddresses.push(msg.from, ...msg.to, ...(msg.cc ?? []));
+  }
+  const participants = deduplicateAddresses(allAddresses);
+
+  const subject = messages.find((m) => m.subject.trim())?.subject ?? messages[0].subject ?? '';
+
+  let latestAt = messages[0].occurredAt;
+  for (const msg of messages) {
+    if (Date.parse(msg.occurredAt) > Date.parse(latestAt)) {
+      latestAt = msg.occurredAt;
+    }
+  }
+
+  return {
+    provider: 'google',
+    accountEmail,
+    threadId,
+    subject,
+    snippet: threadJson?.snippet ?? '',
+    participants,
+    latestAt,
+    messageCount: messages.length,
+    sourceUrl: `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#all/${encodeURIComponent(threadId)}`,
+  };
+}
+
+function mapGmailMessageBody(
+  message: GmailMessageJson,
+  accountEmail: string,
+  bodies: { text?: string; html?: string; truncated: boolean; truncationReason?: string },
+  fetchedAt: string,
+): MailboxMessageBody | undefined {
+  const base = mapGmailMessage(message);
+  if (!base) return undefined;
+  const threadId = base.threadId ?? message.id ?? '';
+  return {
+    ...base,
+    accountEmail,
+    threadId,
+    bodyText: bodies.text,
+    bodyHtml: bodies.html,
+    providerTruncated: bodies.truncated,
+    truncationReason: bodies.truncationReason,
+    sourceUrl: `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#all/${encodeURIComponent(base.id)}`,
+    fetchedAt,
   };
 }
 
@@ -463,6 +654,173 @@ export class GoogleConnector
       messages.push(...details.filter(isDefined));
     }
     return { messages, nextPageToken: page.nextPageToken };
+  }
+
+  async listMailboxThreads(input: ListMailboxThreadsInput): Promise<MailboxThreadPage> {
+    validateMailboxThreadListInput(input);
+    const pageSize = Math.min(input.pageSize ?? 50, 50);
+    const url = new URL(`${this.#gmailBaseUrl}/users/${encodeURIComponent(this.#userId)}/threads`);
+    if (input.query) url.searchParams.set('q', input.query);
+    url.searchParams.set('maxResults', String(pageSize));
+    if (input.pageToken) url.searchParams.set('pageToken', input.pageToken);
+
+    const response = await this.#request(
+      'gmail.threads.list',
+      url.toString(),
+      { signal: input.signal },
+      false,
+      true,
+    );
+    const page = await parseJson<{
+      threads?: Array<{ id?: string; snippet?: string }>;
+      nextPageToken?: string;
+    }>(response);
+
+    const stubs = (page.threads ?? []).filter(
+      (t): t is { id: string; snippet?: string } =>
+        typeof t.id === 'string' && Boolean(t.id.trim()),
+    );
+
+    const threads: MailboxThread[] = [];
+    for (let offset = 0; offset < stubs.length; offset += 10) {
+      const batch = stubs.slice(offset, offset + 10);
+      const details = await Promise.all(
+        batch.map(async (stub) => {
+          const detailUrl = new URL(
+            `${this.#gmailBaseUrl}/users/${encodeURIComponent(this.#userId)}/threads/${encodeURIComponent(stub.id)}`,
+          );
+          detailUrl.searchParams.set('format', 'metadata');
+          for (const header of ['From', 'To', 'Cc', 'Subject', 'Date']) {
+            detailUrl.searchParams.append('metadataHeaders', header);
+          }
+          const detailRes = await this.#request(
+            'gmail.threads.getMetadata',
+            detailUrl.toString(),
+            { signal: input.signal },
+            false,
+            true,
+          );
+          const threadJson = await parseJson<{
+            id?: string;
+            snippet?: string;
+            messages?: GmailMessageJson[];
+          }>(detailRes);
+          return mapGmailThreadSummary(threadJson, input.accountEmail, stub.id);
+        }),
+      );
+      threads.push(...details.filter(isDefined));
+    }
+
+    return {
+      threads,
+      nextPageToken: page.nextPageToken,
+    };
+  }
+
+  async getMailboxThread(input: GetMailboxThreadInput): Promise<MailboxThreadMessagesPage> {
+    validateGetMailboxThreadInput(input);
+    const pageSize = Math.min(input.pageSize ?? 50, 50);
+
+    const detailUrl = new URL(
+      `${this.#gmailBaseUrl}/users/${encodeURIComponent(this.#userId)}/threads/${encodeURIComponent(input.threadId)}`,
+    );
+    detailUrl.searchParams.set('format', 'full');
+
+    const response = await this.#request(
+      'gmail.threads.get',
+      detailUrl.toString(),
+      { signal: input.signal },
+      false,
+      true,
+    );
+
+    const threadJson = await parseJson<{
+      id?: string;
+      snippet?: string;
+      messages?: GmailMessageJson[];
+    }>(response);
+
+    const threadSummary = mapGmailThreadSummary(threadJson, input.accountEmail, input.threadId);
+    if (!threadSummary) {
+      throw new ConnectorError({
+        provider: this.provider,
+        operation: 'gmail.threads.get',
+        code: 'NOT_FOUND',
+        message: 'Mailbox thread not found',
+      });
+    }
+
+    const rawMessages = threadJson.messages ?? [];
+    const offset = input.pageToken ? Number.parseInt(input.pageToken, 10) : 0;
+    const start = Number.isNaN(offset) ? 0 : offset;
+    const slicedMessages = rawMessages.slice(start, start + pageSize);
+
+    const fetchedAt = new Date().toISOString();
+    let cumulativeBytes = 0;
+    const messageBodies: MailboxMessageBody[] = [];
+
+    for (const msgJson of slicedMessages) {
+      const bodies = await extractGmailBodies(
+        msgJson,
+        async (attachmentId) => {
+          const attUrl = new URL(
+            `${this.#gmailBaseUrl}/users/${encodeURIComponent(this.#userId)}/messages/${encodeURIComponent(msgJson.id!)}/attachments/${encodeURIComponent(attachmentId)}`,
+          );
+          const attRes = await this.#request(
+            'gmail.messages.attachments.get',
+            attUrl.toString(),
+            { signal: input.signal },
+            false,
+            true,
+          );
+          return parseJson<{ data?: string; size?: number }>(attRes);
+        },
+        input.signal,
+      );
+      let mapped = mapGmailMessageBody(msgJson, input.accountEmail, bodies, fetchedAt);
+      if (mapped) {
+        const msgBytes =
+          (mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0) +
+          (mapped.bodyHtml ? utf8ByteLength(mapped.bodyHtml) : 0);
+        if (cumulativeBytes >= MAX_CUMULATIVE_BODY_BYTES) {
+          mapped = {
+            ...mapped,
+            bodyText: undefined,
+            bodyHtml: undefined,
+            providerTruncated: true,
+            truncationReason: 'Application body safety limit reached',
+          };
+        } else if (cumulativeBytes + msgBytes > MAX_CUMULATIVE_BODY_BYTES) {
+          const remainingBudget = MAX_CUMULATIVE_BODY_BYTES - cumulativeBytes;
+          if (mapped.bodyText) {
+            const res = truncateUtf8Bytes(mapped.bodyText, remainingBudget);
+            mapped.bodyText = res.text;
+          }
+          if (mapped.bodyHtml) {
+            const usedText = mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0;
+            const remainingHtml = Math.max(0, remainingBudget - usedText);
+            const res = truncateUtf8Bytes(mapped.bodyHtml, remainingHtml);
+            mapped.bodyHtml = res.text;
+          }
+          mapped.providerTruncated = true;
+          mapped.truncationReason = 'Application body safety limit reached';
+        }
+        const finalBytes =
+          (mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0) +
+          (mapped.bodyHtml ? utf8ByteLength(mapped.bodyHtml) : 0);
+        cumulativeBytes += finalBytes;
+        messageBodies.push(mapped);
+      }
+    }
+
+    const hasNext = start + pageSize < rawMessages.length;
+    const nextPageToken = hasNext ? String(start + pageSize) : undefined;
+
+    return {
+      thread: threadSummary,
+      messages: messageBodies,
+      nextPageToken,
+    };
   }
 
   async createEvent(input: CalendarEventInput): Promise<CalendarEvent> {

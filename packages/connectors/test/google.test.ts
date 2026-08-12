@@ -1,7 +1,7 @@
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ConnectorError, GoogleConnector } from '../src/index.js';
+import { ConnectorError, GoogleConnector, utf8Base64Url } from '../src/index.js';
 import { approvedSafety, ledger, message, noSleep, now, sendContext } from './helpers.js';
 
 const server = setupServer();
@@ -464,5 +464,380 @@ describe('Google Gmail and Calendar connector', () => {
       providerCode: 'PERMISSION_DENIED',
       retryable: false,
     });
+  });
+  it('lists mailbox threads with metadata-only rows, bounded pagination, and query support', async () => {
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('maxResults')).toBe('10');
+        expect(url.searchParams.get('q')).toBe('application');
+        return HttpResponse.json({
+          threads: [{ id: 'thread-101' }],
+          nextPageToken: 'page-2',
+        });
+      }),
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-101', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('format')).toBe('metadata');
+        return HttpResponse.json({
+          id: 'thread-101',
+          snippet: 'Interview details inside',
+          messages: [
+            {
+              id: 'msg-1',
+              threadId: 'thread-101',
+              internalDate: '1770000000000',
+              labelIds: ['INBOX'],
+              payload: {
+                headers: [
+                  { name: 'From', value: 'Recruiter <recruiter@acme.com>' },
+                  { name: 'To', value: 'Candidate <user@example.com>' },
+                  { name: 'Subject', value: 'Interview with Acme' },
+                  { name: 'Date', value: 'Mon, 02 Feb 2026 10:00:00 GMT' },
+                ],
+              },
+            },
+          ],
+        });
+      }),
+    );
+
+    const connector = client();
+    await expect(connector.listMailboxThreads({ accountEmail: 'user@example.com', pageSize: 60 })).rejects.toThrow(
+      TypeError,
+    );
+
+    const result = await connector.listMailboxThreads({
+      accountEmail: 'user@example.com',
+      query: 'application',
+      pageSize: 10,
+    });
+
+    expect(result).toEqual({
+      threads: [
+        {
+          provider: 'google',
+          accountEmail: 'user@example.com',
+          threadId: 'thread-101',
+          subject: 'Interview with Acme',
+          snippet: 'Interview details inside',
+          participants: [
+            { email: 'recruiter@acme.com', name: 'Recruiter' },
+            { email: 'user@example.com', name: 'Candidate' },
+          ],
+          latestAt: new Date(1770000000000).toISOString(),
+          messageCount: 1,
+          sourceUrl: 'https://mail.google.com/mail/u/user%40example.com/#all/thread-101',
+        },
+      ],
+      nextPageToken: 'page-2',
+    });
+  });
+
+  it('gets mailbox thread with recursive MIME decoding, attachment bodies, plain/HTML, pre/table/quoted, and cancellation', async () => {
+    const plainText = '> Quoted previous email\n\nHere is the job offer table:\n<table><tr><td>Role</td></tr></table>';
+    const htmlText = '<pre>Code snippet</pre><p><a href="https://example.com/very/long/url">Link</a></p>';
+
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-202', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('format')).toBe('full');
+        return HttpResponse.json({
+          id: 'thread-202',
+          snippet: 'Offer details',
+          messages: [
+            {
+              id: 'msg-plain-html',
+              threadId: 'thread-202',
+              internalDate: '1770000100000',
+              labelIds: ['SENT'],
+              payload: {
+                mimeType: 'multipart/alternative',
+                headers: [
+                  { name: 'From', value: 'user@example.com' },
+                  { name: 'To', value: 'recruiter@acme.com' },
+                  { name: 'Subject', value: 'Re: Offer details' },
+                  { name: 'Message-ID', value: '<msg-202@acme.com>' },
+                  { name: 'X-Outreachr-Operation-Key', value: 'op-key-123' },
+                ],
+                parts: [
+                  {
+                    mimeType: 'text/plain',
+                    body: { data: utf8Base64Url(plainText) },
+                  },
+                  {
+                    mimeType: 'text/html',
+                    body: { data: utf8Base64Url(htmlText) },
+                  },
+                ],
+              },
+            },
+            {
+              id: 'msg-attachment-body',
+              threadId: 'thread-202',
+              internalDate: '1770000200000',
+              labelIds: ['INBOX'],
+              payload: {
+                mimeType: 'multipart/mixed',
+                headers: [
+                  { name: 'From', value: 'recruiter@acme.com' },
+                  { name: 'To', value: 'user@example.com' },
+                  { name: 'Subject', value: 'Re: Offer details' },
+                ],
+                parts: [
+                  {
+                    mimeType: 'text/plain',
+                    filename: 'body.txt',
+                    body: { attachmentId: 'att-999', size: 25 },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      }),
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-attachment-body/attachments/att-999', () => {
+        return HttpResponse.json({
+          size: 25,
+          data: utf8Base64Url('Attachment plain content'),
+        });
+      }),
+    );
+
+    const connector = client();
+    const result = await connector.getMailboxThread({
+      accountEmail: 'user@example.com',
+      threadId: 'thread-202',
+    });
+
+    expect(result.messages).toHaveLength(2);
+
+    expect(result.messages[0]).toMatchObject({
+      provider: 'google',
+      id: 'msg-plain-html',
+      threadId: 'thread-202',
+      accountEmail: 'user@example.com',
+      internetMessageId: '<msg-202@acme.com>',
+      operationKey: 'op-key-123',
+      direction: 'outbound',
+      bodyText: plainText,
+      bodyHtml: htmlText,
+      providerTruncated: false,
+      sourceUrl: 'https://mail.google.com/mail/u/user%40example.com/#all/msg-plain-html',
+    });
+
+    expect(result.messages[1]).toMatchObject({
+      provider: 'google',
+      id: 'msg-attachment-body',
+      direction: 'inbound',
+      bodyText: 'Attachment plain content',
+      providerTruncated: false,
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'user@example.com',
+        threadId: 'thread-202',
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('handles empty body, provider errors, truncation, and size limits on Gmail thread reads', async () => {
+    const hugeBody = 'A'.repeat(1_048_576 + 50);
+
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-huge', () => {
+        return HttpResponse.json({
+          id: 'thread-huge',
+          snippet: 'Huge body',
+          messages: [
+            {
+              id: 'msg-huge',
+              threadId: 'thread-huge',
+              internalDate: '1770000000000',
+              labelIds: ['INBOX'],
+              payload: {
+                mimeType: 'text/plain',
+                headers: [
+                  { name: 'From', value: 'user@example.com' },
+                  { name: 'To', value: 'recruiter@acme.com' },
+                  { name: 'Subject', value: 'Huge' },
+                ],
+                body: { data: utf8Base64Url(hugeBody) },
+              },
+            },
+            {
+              id: 'msg-empty',
+              threadId: 'thread-huge',
+              internalDate: '1770000100000',
+              labelIds: ['INBOX'],
+              payload: {
+                mimeType: 'text/plain',
+                headers: [
+                  { name: 'From', value: 'user@example.com' },
+                  { name: 'To', value: 'recruiter@acme.com' },
+                  { name: 'Subject', value: 'Empty' },
+                ],
+              },
+            },
+          ],
+        });
+      }),
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-missing', () => {
+        return HttpResponse.json({ error: { code: 404, message: 'Thread not found' } }, { status: 404 });
+      }),
+    );
+
+    const connector = client();
+    const result = await connector.getMailboxThread({
+      accountEmail: 'user@example.com',
+      threadId: 'thread-huge',
+    });
+
+    expect(result.messages[0].providerTruncated).toBe(true);
+    expect(result.messages[0].truncationReason).toBe('Body content exceeds maximum allowed size');
+    expect(result.messages[0].bodyText?.length).toBe(1_048_576);
+
+    expect(result.messages[1].bodyText).toBeUndefined();
+    expect(result.messages[1].providerTruncated).toBe(false);
+
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'user@example.com',
+        threadId: 'thread-missing',
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      provider: 'google',
+    });
+  });
+  it('enforces multibyte byte-aware truncation, cumulative 8 MiB page cap, input validation, and abort during retry', async () => {
+    const connector = client();
+
+    // Input validation errors
+    await expect(
+      connector.listMailboxThreads({ accountEmail: 'invalid-email' }),
+    ).rejects.toThrow('Account email is invalid');
+
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'user@example.com',
+        query: 'test\r\ninjected',
+      }),
+    ).rejects.toThrow('Query is invalid');
+
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'user@example.com',
+        threadId: 'id\nwithcrlf',
+      }),
+    ).rejects.toThrow('Thread ID is invalid');
+
+    // Multibyte byte-aware truncation test
+    const multibyteChar = '🚀'; // 4 bytes in UTF-8
+    const repeatedMultibyte = multibyteChar.repeat(300_000); // 1.2 MB in bytes, but only 300,000 code points
+
+    // Cumulative 8 MiB cap setup: 9 messages of ~1 MiB each
+    const oneMbString = 'X'.repeat(1_000_000);
+    const messagesList = Array.from({ length: 9 }, (_, i) => ({
+      id: `msg-cumul-${i}`,
+      threadId: `thread-cumul`,
+      internalDate: String(1770000000000 + i * 1000),
+      labelIds: ['INBOX'],
+      payload: {
+        mimeType: 'text/plain',
+        headers: [
+          { name: 'From', value: 'user@example.com' },
+          { name: 'To', value: 'recruiter@acme.com' },
+          { name: 'Subject', value: `Subject ${i}` },
+        ],
+        body: { data: utf8Base64Url(oneMbString) },
+      },
+    }));
+
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-multibyte', () => {
+        return HttpResponse.json({
+          id: 'thread-multibyte',
+          snippet: 'Multibyte test',
+          messages: [
+            {
+              id: 'msg-mb',
+              threadId: 'thread-multibyte',
+              internalDate: '1770000000000',
+              labelIds: ['INBOX'],
+              payload: {
+                mimeType: 'text/plain',
+                headers: [
+                  { name: 'From', value: 'user@example.com' },
+                  { name: 'To', value: 'recruiter@acme.com' },
+                  { name: 'Subject', value: 'Multibyte' },
+                ],
+                body: { data: utf8Base64Url(repeatedMultibyte) },
+              },
+            },
+          ],
+        });
+      }),
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-cumul', () => {
+        return HttpResponse.json({
+          id: 'thread-cumul',
+          snippet: 'Cumulative test',
+          messages: messagesList,
+        });
+      }),
+    );
+
+    const mbResult = await connector.getMailboxThread({
+      accountEmail: 'user@example.com',
+      threadId: 'thread-multibyte',
+    });
+    expect(mbResult.messages[0].providerTruncated).toBe(true);
+    expect(mbResult.messages[0].truncationReason).toBe('Body content exceeds maximum allowed size');
+    const bytesDecoded = new TextEncoder().encode(mbResult.messages[0].bodyText ?? '').length;
+    expect(bytesDecoded).toBeLessThanOrEqual(1_048_576);
+
+    const cumulResult = await connector.getMailboxThread({
+      accountEmail: 'user@example.com',
+      threadId: 'thread-cumul',
+    });
+    expect(cumulResult.messages).toHaveLength(9);
+    // First 8 messages fit in 8 MiB (8 * 1,000,000 bytes = 8,000,000 bytes <= 8,388,608 bytes)
+    expect(cumulResult.messages[7].bodyText).toBeDefined();
+    // 9th message exceeds 8 MiB cumulative cap and is truncated/omitted
+    expect(cumulResult.messages[8].providerTruncated).toBe(true);
+    expect(cumulResult.messages[8].truncationReason).toBe('Application body safety limit reached');
+
+    // Abort during retry test
+    let retryCallCount = 0;
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-retry-abort', () => {
+        retryCallCount += 1;
+        return HttpResponse.error(); // Network error to force retry
+      }),
+    );
+
+    const retryConnector = new GoogleConnector({
+      fetch,
+      getAccessToken: async () => 'token',
+      sendLedger: ledger(),
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 2000, maxDelayMs: 2000 }, // long delay
+      sleep: noSleep,
+      now,
+    });
+
+    const controller = new AbortController();
+    const pendingPromise = retryConnector.getMailboxThread({
+      accountEmail: 'user@example.com',
+      threadId: 'thread-retry-abort',
+      signal: controller.signal,
+    });
+
+    // Abort signal while request is in progress
+    controller.abort();
+    await expect(pendingPromise).rejects.toThrow();
   });
 });

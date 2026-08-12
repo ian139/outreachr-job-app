@@ -457,4 +457,272 @@ describe('Microsoft Graph mail and calendar connector', () => {
       }),
     ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
   });
+  it('lists Microsoft mailbox threads with metadata-only rows, pagination, nextLink validation, and query support', async () => {
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('$top')).toBe('10');
+        expect(url.searchParams.get('$search')).toBe('"application"');
+        return HttpResponse.json({
+          value: [
+            {
+              id: 'ms-msg-1',
+              conversationId: 'conv-101',
+              subject: 'Job Application update',
+              bodyPreview: 'Thank you for your application',
+              from: { emailAddress: { address: 'hr@bigtech.com', name: 'BigTech HR' } },
+              toRecipients: [{ emailAddress: { address: 'applicant@example.com', name: 'Applicant' } }],
+              receivedDateTime: '2026-08-05T12:00:00Z',
+              webLink: 'https://outlook.office.com/mail/id/ms-msg-1',
+            },
+          ],
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=opaque123',
+        });
+      }),
+    );
+
+    const connector = client();
+    await expect(connector.listMailboxThreads({ accountEmail: 'applicant@example.com', pageSize: 100 })).rejects.toThrow(
+      TypeError,
+    );
+
+    const result = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      query: 'application',
+      pageSize: 10,
+    });
+
+    expect(result).toEqual({
+      threads: [
+        {
+          provider: 'microsoft',
+          accountEmail: 'applicant@example.com',
+          threadId: 'conv-101',
+          subject: 'Job Application update',
+          snippet: 'Thank you for your application',
+          participants: [
+            { email: 'hr@bigtech.com', name: 'BigTech HR' },
+            { email: 'applicant@example.com', name: 'Applicant' },
+          ],
+          latestAt: '2026-08-05T12:00:00.000Z',
+          messageCount: 1,
+          sourceUrl: 'https://outlook.office.com/mail/id/ms-msg-1',
+        },
+      ],
+      nextPageToken: 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=opaque123',
+    });
+
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageToken: 'https://evil.example.com/steal-token',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+    });
+  });
+
+  it('gets Microsoft mailbox thread with plain/HTML, pre/table/quoted, direction, webLink, cancellation, and truncation', async () => {
+    const htmlBody = '<table><tr><td>Salary</td></tr></table><pre>log output</pre><a href="https://example.com/long">Link</a>';
+    const hugeContent = 'B'.repeat(1_048_576 + 100);
+
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        const filter = url.searchParams.get('$filter');
+        if (filter?.includes('conv-202')) {
+          return HttpResponse.json({
+            value: [
+              {
+                id: 'msg-ms-outbound',
+                conversationId: 'conv-202',
+                subject: 'Interview Schedule',
+                from: { emailAddress: { address: 'applicant@example.com', name: 'Applicant' } },
+                toRecipients: [{ emailAddress: { address: 'interviewer@bigtech.com', name: 'Interviewer' } }],
+                sentDateTime: '2026-08-06T09:00:00Z',
+                parentFolderId: 'sentitems',
+                webLink: 'https://outlook.office.com/mail/id/msg-ms-outbound',
+                body: { contentType: 'html', content: htmlBody },
+                internetMessageHeaders: [
+                  { name: 'Message-ID', value: '<ms-msg-202@office.com>' },
+                  { name: 'X-Outreachr-Operation-Key', value: 'ms-op-456' },
+                ],
+              },
+            ],
+          });
+        }
+        if (filter?.includes('conv-huge')) {
+          return HttpResponse.json({
+            value: [
+              {
+                id: 'msg-ms-huge',
+                conversationId: 'conv-huge',
+                subject: 'Huge MS Body',
+                from: { emailAddress: { address: 'sender@example.com' } },
+                sentDateTime: '2026-08-06T10:00:00Z',
+                body: { contentType: 'text', content: hugeContent },
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ value: [] });
+      }),
+    );
+
+    const connector = client();
+    const result = await connector.getMailboxThread({
+      accountEmail: 'applicant@example.com',
+      threadId: 'conv-202',
+    });
+
+    expect(result.messages[0]).toMatchObject({
+      provider: 'microsoft',
+      id: 'msg-ms-outbound',
+      threadId: 'conv-202',
+      accountEmail: 'applicant@example.com',
+      internetMessageId: '<ms-msg-202@office.com>',
+      operationKey: 'ms-op-456',
+      direction: 'outbound',
+      bodyHtml: htmlBody,
+      providerTruncated: false,
+      sourceUrl: 'https://outlook.office.com/mail/id/msg-ms-outbound',
+    });
+
+    const hugeResult = await connector.getMailboxThread({
+      accountEmail: 'applicant@example.com',
+      threadId: 'conv-huge',
+    });
+
+    expect(hugeResult.messages[0].providerTruncated).toBe(true);
+    expect(hugeResult.messages[0].truncationReason).toBe('Body content exceeds maximum allowed size');
+    expect(hugeResult.messages[0].bodyText?.length).toBe(1_048_576);
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'applicant@example.com',
+        threadId: 'conv-202',
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'applicant@example.com',
+        threadId: 'conv-missing',
+      }),
+    ).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      provider: 'microsoft',
+    });
+  });
+  it('enforces Microsoft multibyte byte-aware truncation, cumulative 8 MiB page cap, input validation, and abort during retry', async () => {
+    const connector = client();
+
+    // Input validation errors
+    await expect(
+      connector.listMailboxThreads({ accountEmail: 'bad-email' }),
+    ).rejects.toThrow('Account email is invalid');
+
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        query: 'search\nline',
+      }),
+    ).rejects.toThrow('Query is invalid');
+
+    await expect(
+      connector.getMailboxThread({
+        accountEmail: 'applicant@example.com',
+        threadId: 'id\r\ninjected',
+      }),
+    ).rejects.toThrow('Thread ID is invalid');
+
+    // Multibyte byte-aware truncation
+    const multibyteChar = '🌟';
+    const repeatedMultibyte = multibyteChar.repeat(300_000);
+
+    // Cumulative 8 MiB cap setup: 9 messages of ~1 MiB each
+    const oneMbString = 'Y'.repeat(1_000_000);
+    const msgsList = Array.from({ length: 9 }, (_, i) => ({
+      id: `ms-msg-cumul-${i}`,
+      conversationId: 'conv-ms-cumul',
+      subject: `Subject ${i}`,
+      from: { emailAddress: { address: 'applicant@example.com' } },
+      sentDateTime: new Date(1770000000000 + i * 1000).toISOString(),
+      body: { contentType: 'text', content: oneMbString },
+    }));
+
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        const filter = url.searchParams.get('$filter');
+        if (filter?.includes('conv-ms-multibyte')) {
+          return HttpResponse.json({
+            value: [
+              {
+                id: 'ms-msg-mb',
+                conversationId: 'conv-ms-multibyte',
+                subject: 'Multibyte',
+                from: { emailAddress: { address: 'applicant@example.com' } },
+                sentDateTime: '2026-08-06T10:00:00Z',
+                body: { contentType: 'text', content: repeatedMultibyte },
+              },
+            ],
+          });
+        }
+        if (filter?.includes('conv-ms-cumul')) {
+          return HttpResponse.json({
+            value: msgsList,
+          });
+        }
+        return HttpResponse.json({ value: [] });
+      }),
+    );
+
+    const mbResult = await connector.getMailboxThread({
+      accountEmail: 'applicant@example.com',
+      threadId: 'conv-ms-multibyte',
+    });
+    expect(mbResult.messages[0].providerTruncated).toBe(true);
+    expect(mbResult.messages[0].truncationReason).toBe('Body content exceeds maximum allowed size');
+    const bytesDecoded = new TextEncoder().encode(mbResult.messages[0].bodyText ?? '').length;
+    expect(bytesDecoded).toBeLessThanOrEqual(1_048_576);
+
+    const cumulResult = await connector.getMailboxThread({
+      accountEmail: 'applicant@example.com',
+      threadId: 'conv-ms-cumul',
+    });
+    expect(cumulResult.messages).toHaveLength(9);
+    expect(cumulResult.messages[7].bodyText).toBeDefined();
+    expect(cumulResult.messages[8].providerTruncated).toBe(true);
+    expect(cumulResult.messages[8].truncationReason).toBe('Application body safety limit reached');
+
+    // Abort during retry test
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', () => {
+        return HttpResponse.error();
+      }),
+    );
+
+    const retryConnector = new MicrosoftConnector({
+      fetch,
+      getAccessToken: async () => 'token',
+      sendLedger: ledger(),
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 2000, maxDelayMs: 2000 },
+      sleep: noSleep,
+      now,
+    });
+
+    const controller = new AbortController();
+    const pendingPromise = retryConnector.getMailboxThread({
+      accountEmail: 'applicant@example.com',
+      threadId: 'conv-ms-cumul',
+      signal: controller.signal,
+    });
+
+    controller.abort();
+    await expect(pendingPromise).rejects.toThrow();
+  });
 });

@@ -1,8 +1,18 @@
 import { validateEventInput, validateFreeBusyInput, validateListInput } from './calendar.js';
 import { ConnectorError } from './errors.js';
 import { authorizedRequest, parseJson, responseRequestId } from './http.js';
-import { providerEmailAddress, safeIsoTimestamp, validateMailboxListInput } from './mailbox.js';
-import { executeGuardedSend } from './send.js';
+import {
+  deduplicateAddresses,
+  MAX_BODY_SIZE_BYTES,
+  MAX_CUMULATIVE_BODY_BYTES,
+  providerEmailAddress,
+  safeIsoTimestamp,
+  truncateUtf8Bytes,
+  utf8ByteLength,
+  validateGetMailboxThreadInput,
+  validateMailboxListInput,
+  validateMailboxThreadListInput,
+} from './mailbox.js';
 import type {
   CalendarAttendee,
   CalendarConnector,
@@ -18,10 +28,16 @@ import type {
   EmailMessage,
   FreeBusyInput,
   FreeBusyResult,
+  GetMailboxThreadInput,
   ListCalendarEventsInput,
   ListMailboxMessagesInput,
+  ListMailboxThreadsInput,
   MailboxMessage,
+  MailboxMessageBody,
   MailboxMessagePage,
+  MailboxThread,
+  MailboxThreadMessagesPage,
+  MailboxThreadPage,
   RelationshipMailConnector,
   RetryPolicy,
   SendDraftInput,
@@ -29,6 +45,24 @@ import type {
   SendReceipt,
   Sleep,
 } from './types.js';
+PUT 64*=76:
+interface GraphMessageJson {
+  id?: string;
+  conversationId?: string;
+  internetMessageId?: string;
+  subject?: string;
+  from?: GraphRecipientJson;
+  toRecipients?: GraphRecipientJson[];
+  ccRecipients?: GraphRecipientJson[];
+  receivedDateTime?: string;
+  sentDateTime?: string;
+  isDraft?: boolean;
+  webLink?: string;
+  bodyPreview?: string;
+  body?: { contentType?: string; content?: string };
+  parentFolderId?: string;
+  internetMessageHeaders?: Array<{ name?: string; value?: string }>;
+}
 
 export interface MicrosoftConnectorOptions extends ConnectorClientOptions {
   graphBaseUrl?: string;
@@ -277,6 +311,98 @@ function mapGraphMessage(
   };
 }
 
+function mapGraphThreadSummary(
+  msgs: GraphMessageJson[],
+  accountEmail: string,
+  threadId: string,
+): MailboxThread | undefined {
+  if (msgs.length === 0) return undefined;
+
+  const mappedMsgs = msgs.map((m) => mapGraphMessage(m)).filter(isDefined);
+  if (mappedMsgs.length === 0) return undefined;
+
+  const allAddresses: EmailAddress[] = [];
+  for (const m of mappedMsgs) {
+    allAddresses.push(m.from, ...m.to, ...(m.cc ?? []));
+  }
+  const participants = deduplicateAddresses(allAddresses);
+
+  const subject = mappedMsgs.find((m) => m.subject.trim())?.subject ?? mappedMsgs[0].subject ?? '';
+  const snippet = msgs.find((m) => typeof m.bodyPreview === 'string' && m.bodyPreview.trim())?.bodyPreview ?? '';
+
+  let latestAt = mappedMsgs[0].occurredAt;
+  for (const m of mappedMsgs) {
+    if (Date.parse(m.occurredAt) > Date.parse(latestAt)) {
+      latestAt = m.occurredAt;
+    }
+  }
+
+  const firstWebLink = msgs.find((m) => typeof m.webLink === 'string' && m.webLink.trim())?.webLink;
+  const sourceUrl = firstWebLink ?? `https://outlook.office.com/mail/id/${encodeURIComponent(threadId)}`;
+
+  return {
+    provider: 'microsoft',
+    accountEmail,
+    threadId,
+    subject,
+    snippet,
+    participants,
+    latestAt,
+    messageCount: mappedMsgs.length,
+    sourceUrl,
+  };
+}
+
+function mapGraphMessageBody(
+  message: GraphMessageJson,
+  accountEmail: string,
+  fetchedAt: string,
+): MailboxMessageBody | undefined {
+  let direction: MailboxMessage['direction'] = undefined;
+  if (typeof message.parentFolderId === 'string' && message.parentFolderId.toLowerCase().includes('sent')) {
+    direction = 'outbound';
+  }
+  const base = mapGraphMessage(message, direction);
+  if (!base) return undefined;
+
+  let bodyText: string | undefined = undefined;
+  let bodyHtml: string | undefined = undefined;
+  let providerTruncated = false;
+  let truncationReason: string | undefined = undefined;
+
+  if (message.body && typeof message.body.content === 'string') {
+    let content = message.body.content;
+    const res = truncateUtf8Bytes(content, MAX_BODY_SIZE_BYTES);
+    content = res.text;
+    if (res.truncated) {
+      providerTruncated = true;
+      truncationReason = 'Body content exceeds maximum allowed size';
+    }
+    const contentType = (message.body.contentType ?? '').toLowerCase();
+    if (contentType === 'html') {
+      bodyHtml = content;
+    } else {
+      bodyText = content;
+    }
+  }
+
+  const sourceUrl = typeof message.webLink === 'string' && message.webLink.trim()
+    ? message.webLink
+    : `https://outlook.office.com/mail/id/${encodeURIComponent(base.id)}`;
+
+  return {
+    ...base,
+    accountEmail,
+    threadId: base.threadId ?? '',
+    bodyText,
+    bodyHtml,
+    providerTruncated,
+    truncationReason,
+    sourceUrl,
+    fetchedAt,
+  };
+}
+
 export class MicrosoftConnector
   implements EmailConnector, CalendarConnector, RelationshipMailConnector
 {
@@ -478,6 +604,193 @@ export class MicrosoftConnector
           mapGraphMessage(message, input.mailbox === 'sent' ? 'outbound' : undefined),
         )
         .filter(isDefined),
+      nextPageToken: page['@odata.nextLink'],
+    };
+  }
+
+  async listMailboxThreads(input: ListMailboxThreadsInput): Promise<MailboxThreadPage> {
+    validateMailboxThreadListInput(input);
+    const pageSize = Math.min(input.pageSize ?? 50, 50);
+
+    let url: URL;
+    if (input.pageToken) {
+      url = new URL(input.pageToken);
+      const base = new URL(this.#graphBaseUrl);
+      if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
+        throw new ConnectorError({
+          provider: this.provider,
+          operation: 'graph.threads.list',
+          code: 'INVALID_REQUEST',
+          message: 'Microsoft mail page token did not point to the configured Graph endpoint',
+        });
+      }
+    } else {
+      url = new URL(`${this.#graphBaseUrl}/me/messages`);
+      url.searchParams.set(
+        '$select',
+        'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isDraft,webLink,bodyPreview',
+      );
+      if (input.query) {
+        url.searchParams.set('$search', `"${input.query.replace(/"/g, '')}"`);
+      } else {
+        url.searchParams.set('$orderby', 'receivedDateTime desc');
+      }
+      url.searchParams.set('$top', String(pageSize));
+    }
+
+    const response = await this.#request(
+      'graph.threads.list',
+      url.toString(),
+      {
+        headers: { Prefer: 'outlook.body-content-type="text", IdType="ImmutableId"' },
+        signal: input.signal,
+      },
+      false,
+      true,
+    );
+
+    const page = await parseJson<{
+      value?: GraphMessageJson[];
+      '@odata.nextLink'?: string;
+    }>(response);
+
+    const rawMessages = (page.value ?? []).filter((msg) => msg.isDraft !== true);
+
+    const threadMap = new Map<string, GraphMessageJson[]>();
+    for (const msg of rawMessages) {
+      const threadId =
+        (typeof msg.conversationId === 'string' && msg.conversationId.trim()) || msg.id;
+      if (!threadId) continue;
+      const existing = threadMap.get(threadId);
+      if (existing) {
+        existing.push(msg);
+      } else {
+        threadMap.set(threadId, [msg]);
+      }
+    }
+
+    const threads: MailboxThread[] = [];
+    for (const [threadId, msgs] of threadMap.entries()) {
+      const thread = mapGraphThreadSummary(msgs, input.accountEmail, threadId);
+      if (thread) threads.push(thread);
+    }
+
+    return {
+      threads,
+      nextPageToken: page['@odata.nextLink'],
+    };
+  }
+
+  async getMailboxThread(input: GetMailboxThreadInput): Promise<MailboxThreadMessagesPage> {
+    validateGetMailboxThreadInput(input);
+    const pageSize = Math.min(input.pageSize ?? 50, 50);
+
+    let url: URL;
+    if (input.pageToken) {
+      url = new URL(input.pageToken);
+      const base = new URL(this.#graphBaseUrl);
+      if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
+        throw new ConnectorError({
+          provider: this.provider,
+          operation: 'graph.threads.get',
+          code: 'INVALID_REQUEST',
+          message: 'Microsoft mail page token did not point to the configured Graph endpoint',
+        });
+      }
+    } else {
+      url = new URL(`${this.#graphBaseUrl}/me/messages`);
+      url.searchParams.set('$filter', `conversationId eq '${input.threadId.replace(/'/g, "''")}'`);
+      url.searchParams.set(
+        '$select',
+        'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isDraft,webLink,bodyPreview,body,internetMessageHeaders,parentFolderId',
+      );
+      url.searchParams.set('$orderby', 'receivedDateTime asc');
+      url.searchParams.set('$top', String(pageSize));
+    }
+
+    const response = await this.#request(
+      'graph.threads.get',
+      url.toString(),
+      {
+        headers: { Prefer: 'outlook.body-content-type="html", IdType="ImmutableId"' },
+        signal: input.signal,
+      },
+      false,
+      true,
+    );
+
+    const page = await parseJson<{
+      value?: GraphMessageJson[];
+      '@odata.nextLink'?: string;
+    }>(response);
+
+    const rawMessages = (page.value ?? []).filter((msg) => msg.isDraft !== true);
+
+    if (rawMessages.length === 0 && !input.pageToken) {
+      throw new ConnectorError({
+        provider: this.provider,
+        operation: 'graph.threads.get',
+        code: 'NOT_FOUND',
+        message: 'Mailbox thread not found',
+      });
+    }
+
+    const fetchedAt = new Date().toISOString();
+    let cumulativeBytes = 0;
+    const messageBodies: MailboxMessageBody[] = [];
+
+    for (const msg of rawMessages) {
+      let mapped = mapGraphMessageBody(msg, input.accountEmail, fetchedAt);
+      if (mapped) {
+        const msgBytes =
+          (mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0) +
+          (mapped.bodyHtml ? utf8ByteLength(mapped.bodyHtml) : 0);
+        if (cumulativeBytes >= MAX_CUMULATIVE_BODY_BYTES) {
+          mapped = {
+            ...mapped,
+            bodyText: undefined,
+            bodyHtml: undefined,
+            providerTruncated: true,
+            truncationReason: 'Application body safety limit reached',
+          };
+        } else if (cumulativeBytes + msgBytes > MAX_CUMULATIVE_BODY_BYTES) {
+          const remainingBudget = MAX_CUMULATIVE_BODY_BYTES - cumulativeBytes;
+          if (mapped.bodyText) {
+            const res = truncateUtf8Bytes(mapped.bodyText, remainingBudget);
+            mapped.bodyText = res.text;
+          }
+          if (mapped.bodyHtml) {
+            const usedText = mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0;
+            const remainingHtml = Math.max(0, remainingBudget - usedText);
+            const res = truncateUtf8Bytes(mapped.bodyHtml, remainingHtml);
+            mapped.bodyHtml = res.text;
+          }
+          mapped.providerTruncated = true;
+          mapped.truncationReason = 'Application body safety limit reached';
+        }
+        const finalBytes =
+          (mapped.bodyText ? utf8ByteLength(mapped.bodyText) : 0) +
+          (mapped.bodyHtml ? utf8ByteLength(mapped.bodyHtml) : 0);
+        cumulativeBytes += finalBytes;
+        messageBodies.push(mapped);
+      }
+    }
+
+    const threadSummary = mapGraphThreadSummary(rawMessages, input.accountEmail, input.threadId) ?? {
+      provider: 'microsoft',
+      accountEmail: input.accountEmail,
+      threadId: input.threadId,
+      subject: '(No subject)',
+      snippet: '',
+      participants: [],
+      latestAt: safeIsoTimestamp(Date.now())!,
+      messageCount: messageBodies.length,
+      sourceUrl: `https://outlook.office.com/mail/id/${encodeURIComponent(input.threadId)}`,
+    };
+
+    return {
+      thread: threadSummary,
+      messages: messageBodies,
       nextPageToken: page['@odata.nextLink'],
     };
   }

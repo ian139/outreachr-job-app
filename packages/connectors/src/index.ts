@@ -1,4 +1,5 @@
 export * from './errors.js';
+export * from './encoding.js';
 export * from './google.js';
 export * from './mailbox.js';
 export * from './microsoft.js';

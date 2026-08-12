@@ -35,6 +35,30 @@ export interface AuthorizedRequestOptions {
 const defaultSleep: Sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+const cancellableSleep = (
+  milliseconds: number,
+  signal?: AbortSignal,
+  customSleep?: Sleep,
+): Promise<void> => {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new Error('Aborted'));
+  }
+  if (!signal) {
+    return (customSleep ?? defaultSleep)(milliseconds);
+  }
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const onAbort = () => {
+    clearTimeout(timer);
+    reject(signal.reason ?? new Error('Aborted'));
+  };
+  const timer = setTimeout(() => {
+    signal.removeEventListener('abort', onAbort);
+    resolve();
+  }, milliseconds);
+  signal.addEventListener('abort', onAbort, { once: true });
+  return promise;
+};
+
 function mergedRetryPolicy(input?: Partial<RetryPolicy>): RetryPolicy {
   const result = { ...DEFAULT_RETRY_POLICY, ...input };
   if (!Number.isInteger(result.maxAttempts) || result.maxAttempts < 1) {
@@ -113,6 +137,9 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
   const sleep = options.sleep ?? defaultSleep;
   const ambiguousWriteKind = options.isSend ? 'send' : options.isCreate ? 'create' : null;
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+    if (options.init?.signal?.aborted) {
+      throw options.init.signal.reason ?? new Error('Aborted');
+    }
     let response: Response;
     try {
       const token = await options.getAccessToken();
@@ -122,8 +149,14 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
       headers.set('accept', 'application/json');
       response = await options.fetch(options.url, { ...options.init, headers });
     } catch (cause) {
+      if (
+        options.init?.signal?.aborted ||
+        (cause instanceof Error && cause.name === 'AbortError')
+      ) {
+        throw cause;
+      }
       if (options.retryNetworkErrors && attempt < policy.maxAttempts) {
-        await sleep(retryDelay(attempt, undefined, policy));
+        await cancellableSleep(retryDelay(attempt, undefined, policy), options.init?.signal, sleep);
         continue;
       }
       throw new ConnectorError({
@@ -149,17 +182,12 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
 
     if (response.ok) return response;
 
-    // A 408 after an unsafe POST is ambiguous: the server may have committed
-    // the write before timing out. An explicit 429 is a provider rejection and
-    // remains safely retryable according to its Retry-After policy.
     const explicitRetry =
       response.status === 429 || (response.status === 408 && !ambiguousWriteKind);
     const safeOperationRetry = Boolean(options.retryServerErrors && response.status >= 500);
     if ((explicitRetry || safeOperationRetry) && attempt < policy.maxAttempts) {
-      // Consume the small error payload so undici can reuse the connection. MSW's
-      // mocked ReadableStream does not always resolve cancel(), which can deadlock tests.
       await response.arrayBuffer().catch(() => undefined);
-      await sleep(retryDelay(attempt, response, policy));
+      await cancellableSleep(retryDelay(attempt, response, policy), options.init?.signal, sleep);
       continue;
     }
 
