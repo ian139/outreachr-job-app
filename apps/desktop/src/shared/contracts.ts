@@ -408,13 +408,15 @@ export interface DraftMessage {
   id: string;
   provider: ConnectorProvider;
   accountEmail: string;
-  personId: string;
+  applicationId: string;
+  contactId: string;
   recipientName: string;
   recipientEmail: string;
   subject: string;
   bodyText: string;
   threadId: string | null;
-  kind: 'initial' | 'follow_up' | 'intro_request' | 'reply';
+  replyToMessageId: string | null;
+  kind: 'initial' | 'reply';
   contentHash: string;
   approvalState: 'draft' | 'approved' | 'sending' | 'sent' | 'blocked' | 'failed' | 'ambiguous';
   blockReason: string | null;
@@ -695,8 +697,18 @@ export interface CommandMap {
     description: string | null;
     memberFirmIds: string[];
   };
-  'draft.create': Pick<DraftMessage, 'personId' | 'provider' | 'kind' | 'subject' | 'bodyText'> & {
+  'draft.create': Pick<
+    DraftMessage,
+    | 'applicationId'
+    | 'contactId'
+    | 'provider'
+    | 'accountEmail'
+    | 'kind'
+    | 'subject'
+    | 'bodyText'
+  > & {
     threadId?: string | null;
+    replyToMessageId?: string | null;
   };
   'draft.update': { id: string; subject?: string; bodyText?: string };
   'draft.approve': { id: string; expectedContentHash: string };
