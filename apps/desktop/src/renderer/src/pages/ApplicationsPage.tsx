@@ -11,7 +11,12 @@ import '../styles/applications.css';
 export function ApplicationsPage({
   onNavigateThread,
 }: {
-  onNavigateThread?: (threadId: string, provider: ConnectorProvider, accountEmail: string) => void;
+  onNavigateThread?: (
+    threadId: string,
+    provider: ConnectorProvider,
+    accountEmail: string,
+    subject: string | null,
+  ) => void;
 } = {}): React.JSX.Element {
   const { data } = useWorkspace();
   const [viewMode, setViewMode] = useState<'records' | 'pipeline'>('records');

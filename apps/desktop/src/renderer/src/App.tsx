@@ -1,26 +1,16 @@
-import { Navigate, Route, Routes } from './lib/router';
+import { Navigate, Route, Routes, useNavigate } from './lib/router';
 import { AppShell } from './components/AppShell';
 import { ErrorScreen, LoadingScreen } from './components/ui';
 import { useWorkspace } from './state/WorkspaceContext';
-import { AgentPage } from './pages/AgentPage';
-import { DocumentsPage } from './pages/DocumentsPage';
-import { IntroductionsPage } from './pages/IntroductionsPage';
-import { InvestorDetailPage } from './pages/InvestorDetailPage';
-import { InvestorsPage } from './pages/InvestorsPage';
-import { KnowledgePage } from './pages/KnowledgePage';
-import { ListsPage } from './pages/ListsPage';
-import { MeetingsPage } from './pages/MeetingsPage';
-import { OnboardingFlow } from './pages/OnboardingFlow';
-import { OutreachPage } from './pages/OutreachPage';
-import { PipelinePage } from './pages/PipelinePage';
-import { ReviewPage } from './pages/ReviewPage';
-import { RoundOverviewPage } from './pages/RoundOverviewPage';
+import { ApplicationsPage } from './pages/ApplicationsPage';
+import { InboxPage } from './pages/InboxPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { TasksPage } from './pages/TasksPage';
-import { UpNextPage } from './pages/UpNextPage';
+import { WorkspaceSetupPage } from './pages/WorkspaceSetupPage';
+import './styles/job-setup.css';
 
 export function App(): React.JSX.Element {
   const { data, loading, error, refreshing, refresh } = useWorkspace();
+  const navigate = useNavigate();
 
   if (loading) return <LoadingScreen />;
   if (error || !data)
@@ -31,27 +21,27 @@ export function App(): React.JSX.Element {
         retry={() => void refresh()}
       />
     );
-  if (data.isFirstRun) return <OnboardingFlow />;
+  if (!data.workspaceProfile) return <WorkspaceSetupPage />;
 
   return (
     <AppShell>
       <Routes>
-        <Route path="/" element={<UpNextPage />} />
-        <Route path="/round" element={<RoundOverviewPage />} />
-        <Route path="/investors" element={<InvestorsPage />} />
-        <Route path="/investors/:investorId" element={<InvestorDetailPage />} />
-        <Route path="/pipeline" element={<PipelinePage />} />
-        <Route path="/introductions" element={<IntroductionsPage />} />
-        <Route path="/outreach" element={<OutreachPage />} />
-        <Route path="/meetings" element={<MeetingsPage />} />
-        <Route path="/knowledge" element={<KnowledgePage />} />
-        <Route path="/agent" element={<AgentPage />} />
-        <Route path="/review" element={<ReviewPage />} />
-        <Route path="/lists" element={<ListsPage />} />
-        <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/" element={<Navigate to="/applications" replace />} />
+        <Route
+          path="/applications"
+          element={
+            <ApplicationsPage
+              onNavigateThread={(threadId, provider, accountEmail, subject) =>
+                navigate(
+                  `/inbox?thread=${encodeURIComponent(threadId)}&provider=${provider}&account=${encodeURIComponent(accountEmail)}&subject=${encodeURIComponent(subject ?? '')}`,
+                )
+              }
+            />
+          }
+        />
+        <Route path="/inbox" element={<InboxPage />} />
         <Route path="/settings/*" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/applications" replace />} />
       </Routes>
     </AppShell>
   );

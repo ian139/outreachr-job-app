@@ -1,25 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
+import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import {
-  Archive,
-  Bot,
-  CalendarDays,
-  CheckSquare,
-  ChevronRight,
-  CircleDollarSign,
+  BriefcaseBusiness,
   Database,
-  FileText,
-  FolderKanban,
-  Handshake,
   Inbox,
-  ListFilter,
-  Mail,
   Menu,
   PanelLeftClose,
   Search,
   Settings,
-  ShieldCheck,
-  Sparkles,
-  Users,
 } from 'lucide-react';
 import { NavLink, useLocation, useNavigate } from '../lib/router';
 import { useWorkspace } from '../state/WorkspaceContext';
@@ -27,22 +14,8 @@ import { CommandPalette } from './CommandPalette';
 import { IconButton, StateDot, ToastRegion } from './ui';
 
 const primaryNavigation = [
-  { to: '/', label: 'Up next', icon: Inbox },
-  { to: '/round', label: 'Round overview', icon: CircleDollarSign },
-  { to: '/investors', label: 'Investors', icon: Users },
-  { to: '/pipeline', label: 'Pipeline', icon: FolderKanban },
-  { to: '/introductions', label: 'Introductions', icon: Handshake },
-  { to: '/outreach', label: 'Outreach', icon: Mail },
-  { to: '/meetings', label: 'Meetings', icon: CalendarDays },
-];
-
-const knowledgeNavigation = [
-  { to: '/knowledge', label: 'Knowledge', icon: FileText },
-  { to: '/agent', label: 'Agent', icon: Bot },
-  { to: '/review', label: 'Sources & review', icon: ShieldCheck },
-  { to: '/lists', label: 'Lists', icon: ListFilter },
-  { to: '/tasks', label: 'Tasks', icon: CheckSquare },
-  { to: '/documents', label: 'Documents', icon: Archive },
+  { to: '/applications', label: 'Applications', icon: BriefcaseBusiness },
+  { to: '/inbox', label: 'Inbox', icon: Inbox },
 ];
 
 function NavigationItem({
@@ -64,7 +37,7 @@ function NavigationItem({
 }
 
 export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
-  const { data, refreshing, toasts, dismissToast } = useWorkspace();
+  const { refreshing, toasts, dismissToast } = useWorkspace();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
@@ -86,14 +59,14 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
 
   useEffect(() => {
     const pageName =
-      [...primaryNavigation, ...knowledgeNavigation, { to: '/settings', label: 'Settings' }]
+      [...primaryNavigation, { to: '/settings', label: 'Settings' }]
         .sort((left, right) => right.to.length - left.to.length)
         .find(
           (item) =>
             location.pathname === item.to ||
-            (item.to !== '/' && location.pathname.startsWith(`${item.to}/`)),
+            location.pathname.startsWith(`${item.to}/`),
         )?.label ?? 'Workspace';
-    document.title = `${pageName} · Outreachr`;
+    document.title = `${pageName} · Outreachr Job Applications`;
 
     if (previousPathRef.current === location.pathname) return;
     previousPathRef.current = location.pathname;
@@ -103,11 +76,6 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
     return () => window.cancelAnimationFrame(frame);
   }, [location.pathname]);
 
-  const roundLabel = useMemo(() => {
-    if (!data?.round) return 'Set up your round';
-    const stage = data.round.stage.replace('_', '-');
-    return `${data.round.companyName} · ${stage}`;
-  }, [data?.round]);
 
   return (
     <div className={sidebarCollapsed ? 'app-shell app-shell--collapsed' : 'app-shell'}>
@@ -123,11 +91,15 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
       </a>
       <aside className="sidebar" aria-label="Workspace sidebar">
         <div className="sidebar__brand">
-          <button className="brand-button" onClick={() => navigate('/')} aria-label="Open Up next">
+          <button
+            className="brand-button"
+            onClick={() => navigate('/applications')}
+            aria-label="Open job applications"
+          >
             <span className="brand-mark" aria-hidden="true">
               O
             </span>
-            <span className="brand-word">Outreachr</span>
+            <span className="brand-word">Outreachr Jobs</span>
           </button>
           <IconButton
             label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
@@ -137,38 +109,20 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
           </IconButton>
         </div>
 
-        <button
-          className="round-switcher"
-          onClick={() => navigate('/round')}
-          aria-label={`Open active round: ${roundLabel}`}
-        >
-          <span className="round-switcher__dot" aria-hidden="true" />
-          <span className="round-switcher__copy">
-            <small>Active round</small>
-            <strong>{roundLabel}</strong>
-          </span>
-          <ChevronRight aria-hidden="true" />
-        </button>
 
         <button
           className="command-trigger"
           onClick={() => setPaletteOpen(true)}
-          aria-label="Search or ask"
+          aria-label="Search applications"
         >
           <Search aria-hidden="true" />
-          <span>Search or ask</span>
+          <span>Search applications</span>
           <kbd>{navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'} K</kbd>
         </button>
 
         <nav className="sidebar__nav" aria-label="Primary navigation">
           <div className="nav-group">
             {primaryNavigation.map((item) => (
-              <NavigationItem key={item.to} {...item} />
-            ))}
-          </div>
-          <div className="nav-group nav-group--secondary">
-            <p className="nav-group__label">Workspace</p>
-            {knowledgeNavigation.map((item) => (
               <NavigationItem key={item.to} {...item} />
             ))}
           </div>
@@ -201,16 +155,12 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
             <span>{refreshing ? 'Updating local view…' : 'Saved locally'}</span>
           </div>
           <div className="workspace-bar__actions">
-            <button className="agent-trigger" onClick={() => navigate('/agent')}>
-              <Sparkles aria-hidden="true" />
-              <span>Ask agent</span>
-            </button>
             <button
               className="founder-avatar"
               onClick={() => navigate('/settings')}
-              aria-label="Open founder settings"
+              aria-label="Open workspace settings"
             >
-              F
+              J
             </button>
           </div>
         </header>

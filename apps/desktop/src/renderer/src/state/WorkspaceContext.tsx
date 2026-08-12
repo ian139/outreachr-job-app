@@ -111,6 +111,7 @@ export function WorkspaceProvider({ children }: PropsWithChildren): React.JSX.El
       try {
         const result = await window.outreachr.command(name, payload);
         if (
+          name === 'workspace.setup' ||
           name === 'onboarding.complete' ||
           name === 'investor.target' ||
           name === 'pipeline.move' ||
@@ -118,6 +119,12 @@ export function WorkspaceProvider({ children }: PropsWithChildren): React.JSX.El
         ) {
           setData(result as AppBootstrap);
         } else if (
+          (name.startsWith('application.') &&
+            name !== 'application.get' &&
+            name !== 'application.list') ||
+          name.startsWith('company.') ||
+          name.startsWith('contact.') ||
+          name.startsWith('applicationStage.') ||
           name.startsWith('task.') ||
           name.startsWith('meeting.') ||
           name.startsWith('draft.') ||

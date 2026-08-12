@@ -82,7 +82,7 @@ export const SANITIZER_ALLOWLIST = {
     'onsubmit',
   ],
   ALLOW_DATA_ATTR: false,
-} as const;
+};
 
 /**
  * Sanitizes HTML content using DOMPurify with strict allowlist.

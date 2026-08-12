@@ -45,7 +45,6 @@ import type {
   SendReceipt,
   Sleep,
 } from './types.js';
-PUT 64*=76:
 interface GraphMessageJson {
   id?: string;
   conversationId?: string;

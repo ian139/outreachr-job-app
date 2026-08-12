@@ -14,7 +14,12 @@ export function ApplicationDetail({
 }: {
   applicationId: string;
   onBack?: () => void;
-  onNavigateThread?: (threadId: string, provider: ConnectorProvider, accountEmail: string) => void;
+  onNavigateThread?: (
+    threadId: string,
+    provider: ConnectorProvider,
+    accountEmail: string,
+    subject: string | null,
+  ) => void;
 }): React.JSX.Element {
   const { data, command, notify } = useWorkspace();
   const [app, setApp] = useState<ApplicationDetailType | null>(null);
@@ -416,7 +421,14 @@ export function ApplicationDetail({
                         tone="quiet"
                         size="small"
                         style={{ minHeight: '44px' }}
-                        onClick={() => onNavigateThread(thread.providerThreadId, thread.provider, thread.accountEmail)}
+                        onClick={() =>
+                          onNavigateThread(
+                            thread.providerThreadId,
+                            thread.provider,
+                            thread.accountEmail,
+                            thread.subjectSnapshot,
+                          )
+                        }
                       >
                         View related thread
                       </Button>

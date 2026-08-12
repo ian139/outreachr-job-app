@@ -24,6 +24,13 @@ interface ConnectorOption {
 
 export function InboxPage(): React.JSX.Element {
   const { data } = useWorkspace();
+  const linkedParams = new URLSearchParams(
+    window.location.hash.includes('?') ? window.location.hash.slice(window.location.hash.indexOf('?')) : '',
+  );
+  const linkedThreadId = linkedParams.get('thread');
+  const linkedProvider = linkedParams.get('provider');
+  const linkedAccountEmail = linkedParams.get('account');
+  const linkedSubject = linkedParams.get('subject');
 
   // Find all connected mail accounts
   const connectedAccounts = useMemo<ConnectorOption[]>(() => {
@@ -45,21 +52,34 @@ export function InboxPage(): React.JSX.Element {
 
   // Set default selected account
   useEffect(() => {
-    if (connectedAccounts.length > 0) {
-      if (
-        !selectedAccount ||
-        !connectedAccounts.some(
-          (a) =>
-            a.provider === selectedAccount.provider &&
-            a.accountEmail === selectedAccount.accountEmail,
-        )
-      ) {
-        setSelectedAccount(connectedAccounts[0]);
-      }
-    } else {
+    if (connectedAccounts.length === 0) {
       setSelectedAccount(null);
+      return;
     }
-  }, [connectedAccounts, selectedAccount]);
+    const linkedAccount = connectedAccounts.find(
+      (account) =>
+        account.provider === linkedProvider && account.accountEmail === linkedAccountEmail,
+    );
+    if (linkedAccount) {
+      if (
+        selectedAccount?.provider !== linkedAccount.provider ||
+        selectedAccount.accountEmail !== linkedAccount.accountEmail
+      ) {
+        setSelectedAccount(linkedAccount);
+      }
+      return;
+    }
+    if (
+      !selectedAccount ||
+      !connectedAccounts.some(
+        (account) =>
+          account.provider === selectedAccount.provider &&
+          account.accountEmail === selectedAccount.accountEmail,
+      )
+    ) {
+      setSelectedAccount(connectedAccounts[0] ?? null);
+    }
+  }, [connectedAccounts, linkedAccountEmail, linkedProvider, selectedAccount]);
 
   // Thread list states
   const [threads, setThreads] = useState<MailThreadSummary[]>([]);
@@ -119,13 +139,14 @@ export function InboxPage(): React.JSX.Element {
       setListError(null);
 
       try {
+        const query = searchQuery.trim();
         const res = await window.outreachr.listMailThreads({
           requestId,
           provider: selectedAccount.provider,
           accountEmail: selectedAccount.accountEmail,
-          query: searchQuery.trim() || undefined,
+          ...(query ? { query } : {}),
           limit: 20,
-          cursor,
+          ...(cursor ? { cursor } : {}),
         });
 
         // Stale check
@@ -203,6 +224,7 @@ export function InboxPage(): React.JSX.Element {
         if (activeDetailRequestIdRef.current !== requestId) return;
 
         setThreadDetail(detail);
+        setSelectedThreadSummary(detail.thread);
       } catch (err) {
         if (activeDetailRequestIdRef.current !== requestId) return;
         setDetailError(err instanceof Error ? err.message : 'Failed to fetch thread detail.');
@@ -214,6 +236,42 @@ export function InboxPage(): React.JSX.Element {
     },
     [selectedAccount],
   );
+  useEffect(() => {
+    if (
+      !linkedThreadId ||
+      (linkedProvider !== 'google' && linkedProvider !== 'microsoft') ||
+      !linkedAccountEmail ||
+      selectedAccount?.provider !== linkedProvider ||
+      selectedAccount.accountEmail !== linkedAccountEmail ||
+      selectedThreadSummary?.threadId === linkedThreadId
+    ) {
+      return;
+    }
+    const loaded = threads.find((thread) => thread.threadId === linkedThreadId);
+    void selectThread(
+      loaded ?? {
+        provider: linkedProvider,
+        accountEmail: linkedAccountEmail,
+        threadId: linkedThreadId,
+        subject: linkedSubject || 'Linked email thread',
+        snippet: null,
+        participants: [],
+        latestAt: '',
+        messageCount: 0,
+        sourceUrl: null,
+      },
+    );
+  }, [
+    linkedAccountEmail,
+    linkedProvider,
+    linkedSubject,
+    linkedThreadId,
+    selectThread,
+    selectedAccount,
+    selectedThreadSummary,
+    threads,
+  ]);
+
 
   // Detail cursor pagination: load additional pages of messages in thread detail
   const loadMoreMessages = useCallback(async () => {
