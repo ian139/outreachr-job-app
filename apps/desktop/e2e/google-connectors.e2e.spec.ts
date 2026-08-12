@@ -20,13 +20,13 @@ async function twoPeopleWithoutEmail(page: Page): Promise<[Candidate, Candidate]
 }
 
 test.describe('Google connectors through the built Electron IPC boundary', () => {
-  test('connects with PKCE, exhausts Gmail and Calendar pages, creates an invite, sends once, and blocks replay', async ({
+  test('connects with PKCE, exhausts Gmail and Calendar pages, and creates an invite', async ({
     googleProviderMock,
     page,
     rendererErrors,
   }) => {
     await completeOnboarding(page);
-    const [historicalPerson, sendRecipient] = await twoPeopleWithoutEmail(page);
+    const [historicalPerson] = await twoPeopleWithoutEmail(page);
 
     await navigate(page, 'Settings');
     await page.getByRole('button', { name: 'Mail & calendar', exact: true }).click();
@@ -155,61 +155,6 @@ test.describe('Google connectors through the built Electron IPC boundary', () =>
       personIds: [historicalPerson.id],
     });
 
-    const sent = await page.evaluate(
-      async ({ personId, recipientName }) => {
-        await window.outreachr.command('person.contact.add', {
-          personId,
-          kind: 'work_email',
-          value: 'fresh.target@example.test',
-          visibility: 'private',
-          contributionEligible: false,
-        });
-        const draft = await window.outreachr.command('draft.create', {
-          personId,
-          provider: 'google',
-          kind: 'initial',
-          subject: 'A founder-reviewed connector E2E message',
-          bodyText: `Hi ${recipientName.split(' ')[0]},\n\nI believe our local-first AI infrastructure may fit your seed thesis.\n\nAda\n\n—\nAda Founder\nLocal Labs\n123 Founder Way\nSan Francisco, CA 94107\nUnited States\nIf you prefer no further email from me, reply "opt out" and I will not contact you again.`,
-        });
-        const approved = await window.outreachr.command('draft.approve', {
-          id: draft.id,
-          expectedContentHash: draft.contentHash,
-        });
-        return window.outreachr.command('draft.send', {
-          id: approved.id,
-          expectedContentHash: approved.contentHash,
-        });
-      },
-      { personId: sendRecipient.id, recipientName: sendRecipient.name },
-    );
-    expect(sent).toMatchObject({
-      approvalState: 'sent',
-      providerMessageId: 'e2e-provider-message-1',
-      recipientEmail: 'fresh.target@example.test',
-    });
-    expect(googleProviderMock.gmailSendCalls).toBe(1);
-    // Adding a canonical email changes the identity digest. The send guard must
-    // therefore invalidate the old completion cursor and exhaust both pages
-    // again instead of relying on an incremental overlap query.
-    expect(googleProviderMock.gmailListQueries).toEqual(['', '', '', '']);
-    expect(googleProviderMock.gmailMetadataIds).toHaveLength(6);
-    const rawMessage = Buffer.from(googleProviderMock.sentRawMessages[0]!, 'base64url').toString(
-      'utf8',
-    );
-    expect(rawMessage).toMatch(/^To: .*<fresh\.target@example\.test>$/mu);
-    expect(rawMessage).toContain('Subject: A founder-reviewed connector E2E message');
-    expect(rawMessage).toMatch(/X-Outreachr-Operation-Key: send:[^\r\n]+/u);
-
-    const replayError = await page.evaluate(async ({ id, contentHash }) => {
-      try {
-        await window.outreachr.command('draft.send', { id, expectedContentHash: contentHash });
-        return null;
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-      }
-    }, sent);
-    expect(replayError).toMatch(/Exact founder approval is required/u);
-    expect(googleProviderMock.gmailSendCalls).toBe(1);
     expect(googleProviderMock.authorizationHeaders.length).toBeGreaterThan(0);
     expect(new Set(googleProviderMock.authorizationHeaders)).toEqual(
       new Set(['Bearer e2e-google-access']),

@@ -152,9 +152,9 @@ export class MailReadService {
 
       const page = await connector.listMailboxThreads({
         accountEmail: request.accountEmail,
-        query: request.query,
+        ...(request.query ? { query: request.query } : {}),
         pageSize: request.limit,
-        pageToken: request.cursor,
+        ...(request.cursor ? { pageToken: request.cursor } : {}),
         signal: controller.signal,
       });
 
@@ -221,7 +221,7 @@ export class MailReadService {
         accountEmail: request.accountEmail,
         threadId: request.threadId,
         pageSize: request.limit,
-        pageToken: request.cursor,
+        ...(request.cursor ? { pageToken: request.cursor } : {}),
         signal: controller.signal,
       });
 

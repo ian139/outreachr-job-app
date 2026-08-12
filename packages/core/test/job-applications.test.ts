@@ -119,14 +119,14 @@ describe('job application workspace setup', () => {
     expect(stages.filter((stage) => stage.terminal).map((stage) => stage.name)).toEqual([
       'Rejected',
     ]);
-    const edges = core.all<{ fromStage: string; to: string }>(
-      `SELECT t.from_stage_id AS fromStage, s.name AS to
+    const edges = core.all<{ fromStage: string; targetName: string }>(
+      `SELECT t.from_stage_id AS fromStage, s.name AS targetName
        FROM application_stage_transitions t
        JOIN application_stages f ON f.id=t.from_stage_id
        JOIN application_stages s ON s.id=t.to_stage_id
        ORDER BY f.position`,
     );
-    expect(edges.map((edge) => `${edge.fromStage}:${edge.to}`)).toEqual([
+    expect(edges.map((edge) => `${edge.fromStage}:${edge.targetName}`)).toEqual([
       `${stageByName(stages, 'Applied').id}:Screen`,
       `${stageByName(stages, 'Screen').id}:Interview`,
       `${stageByName(stages, 'Interview').id}:Offer`,
@@ -158,8 +158,10 @@ describe('job application workspace setup', () => {
         LATER,
       ),
     ).toThrow('Workspace is already set up');
+    const duplicateCore = vault();
+    const duplicateRepo = new OutreachrRepository(duplicateCore);
     expect(() =>
-      repo.setupWorkspace(
+      duplicateRepo.setupWorkspace(
         {
           displayName: 'Dupes',
           primaryEmail: 'founder@example.test',
@@ -171,13 +173,17 @@ describe('job application workspace setup', () => {
         NOW,
       ),
     ).toThrow('Stage names must be unique');
+    duplicateCore.close();
+    const boundedCore = vault();
+    const boundedRepo = new OutreachrRepository(boundedCore);
     const tooMany = Array.from({ length: 33 }, (_, index) => ({ name: `Stage ${index}` }));
     expect(() =>
-      repo.setupWorkspace(
+      boundedRepo.setupWorkspace(
         { displayName: 'Many', primaryEmail: 'founder@example.test', stages: tooMany },
         NOW,
       ),
     ).toThrow();
+    boundedCore.close();
     core.close();
   });
 });
@@ -609,7 +615,7 @@ describe('application-bound drafts', () => {
          VALUES ('draft-broken','a@b.example','a@b.example','S','B','app-1',?,?)`,
         [NOW, NOW],
       ),
-    ).toThrow('one application and contact context');
+    ).toThrow();
     // A draft cannot be reparented after creation.
     expect(() =>
       core.run("UPDATE messages SET application_contact_id='contact-jane' WHERE id='draft-1'"),

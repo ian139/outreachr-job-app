@@ -3,12 +3,12 @@
   "desktopName": "outreachr.desktop",
   "version": "0.1.2",
   "private": true,
-  "description": "Outreachr local-first Electron desktop application",
+  "description": "Local-first job-application communication workspace",
   "author": "Outreachr contributors",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lalalune/outreachr.git"
+    "url": "git+https://github.com/Ian139/outreachr-job-app.git"
   },
   "type": "module",
   "main": "./out/main/index.js",
