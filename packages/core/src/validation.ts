@@ -379,6 +379,214 @@ export const AgentProposalSchema = z.object({
 });
 export type AgentProposalInput = z.input<typeof AgentProposalSchema>;
 
+export const ApplicationStageSetupSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  terminal: z.boolean().default(false),
+});
+export type ApplicationStageSetup = z.input<typeof ApplicationStageSetupSchema>;
+
+export const WorkspaceSetupSchema = z.object({
+  displayName: z.string().trim().min(1).max(300),
+  primaryEmail: EmailSchema,
+  stages: z.array(ApplicationStageSetupSchema).min(1).max(32),
+});
+export type WorkspaceSetupInput = z.input<typeof WorkspaceSetupSchema>;
+
+export const CompanySchema = z.object({
+  id: IdSchema.optional(),
+  name: z.string().trim().min(1).max(500),
+  website: UrlSchema.nullable().optional(),
+  location: z.string().trim().max(1000).nullable().optional(),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type CompanyInput = z.input<typeof CompanySchema>;
+export type Company = z.output<typeof CompanySchema>;
+
+export const ContactSchema = z.object({
+  id: IdSchema.optional(),
+  companyId: IdSchema.nullable().optional(),
+  name: z.string().trim().min(1).max(500),
+  title: z.string().trim().max(500).nullable().optional(),
+  primaryEmail: EmailSchema.nullable().optional(),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ContactInput = z.input<typeof ContactSchema>;
+export type Contact = z.output<typeof ContactSchema>;
+
+export const ApplicationStageSchema = z.object({
+  id: IdSchema.optional(),
+  name: z.string().trim().min(1).max(200),
+  position: z.number().int().min(0).max(31),
+  terminal: z.boolean().default(false),
+  archived: z.boolean().default(false),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ApplicationStageInput = z.input<typeof ApplicationStageSchema>;
+export type ApplicationStage = z.output<typeof ApplicationStageSchema>;
+
+export const ApplicationStageTransitionSetSchema = z
+  .object({
+    fromStageId: IdSchema,
+    toStageId: IdSchema,
+    allowed: z.boolean(),
+  })
+  .superRefine((transition, context) => {
+    if (transition.fromStageId === transition.toStageId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'A stage cannot transition to itself',
+      });
+    }
+  });
+export type ApplicationStageTransitionSetInput = z.input<
+  typeof ApplicationStageTransitionSetSchema
+>;
+
+export const CreateJobApplicationSchema = z.object({
+  id: IdSchema.optional(),
+  companyId: IdSchema,
+  role: z.string().trim().min(1).max(2000),
+  stageId: IdSchema,
+  sourceUrl: UrlSchema.nullable().optional(),
+  appliedAt: IsoDateTimeSchema.nullable().optional(),
+  nextEventAt: IsoDateTimeSchema.nullable().optional(),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type CreateJobApplicationInput = z.input<typeof CreateJobApplicationSchema>;
+
+export const UpdateJobApplicationSchema = z.object({
+  id: IdSchema,
+  companyId: IdSchema.optional(),
+  role: z.string().trim().min(1).max(2000).optional(),
+  sourceUrl: UrlSchema.nullable().optional(),
+  appliedAt: IsoDateTimeSchema.nullable().optional(),
+  nextEventAt: IsoDateTimeSchema.nullable().optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type UpdateJobApplicationInput = z.input<typeof UpdateJobApplicationSchema>;
+
+export const ListJobApplicationsSchema = z.object({
+  query: z.string().trim().max(500).optional(),
+  stageIds: z.array(IdSchema).max(100).optional(),
+  companyId: IdSchema.optional(),
+  taskStatus: z.enum(['open', 'done', 'dismissed']).optional(),
+  limit: z.number().int().min(1).max(100),
+  cursor: z.string().trim().min(1).max(500).optional(),
+});
+export type ListJobApplicationsInput = z.input<typeof ListJobApplicationsSchema>;
+
+export const TransitionJobApplicationSchema = z.object({
+  id: IdSchema,
+  toStageId: IdSchema,
+  note: z.string().trim().max(10000).nullable().optional(),
+});
+export type TransitionJobApplicationInput = z.input<typeof TransitionJobApplicationSchema>;
+
+export const LinkApplicationContactSchema = z.object({
+  applicationId: IdSchema,
+  contactId: IdSchema,
+  relationship: z.string().trim().min(1).max(500),
+  primary: z.boolean().default(false),
+});
+export type LinkApplicationContactInput = z.input<typeof LinkApplicationContactSchema>;
+
+export const UnlinkApplicationContactSchema = z.object({
+  applicationId: IdSchema,
+  contactId: IdSchema,
+});
+export type UnlinkApplicationContactInput = z.input<typeof UnlinkApplicationContactSchema>;
+
+export const LinkApplicationThreadSchema = z.object({
+  applicationId: IdSchema,
+  provider: z.enum(['google', 'microsoft']),
+  accountEmail: EmailSchema,
+  providerThreadId: z.string().trim().min(1).max(2000),
+  subjectSnapshot: z.string().trim().max(998).nullable().optional(),
+});
+export type LinkApplicationThreadInput = z.input<typeof LinkApplicationThreadSchema>;
+
+export const UnlinkApplicationThreadSchema = z.object({
+  applicationId: IdSchema,
+  provider: z.enum(['google', 'microsoft']),
+  accountEmail: EmailSchema,
+  providerThreadId: z.string().trim().min(1).max(2000),
+});
+export type UnlinkApplicationThreadInput = z.input<typeof UnlinkApplicationThreadSchema>;
+
+export const ApplicationNoteCreateSchema = z.object({
+  id: IdSchema.optional(),
+  applicationId: IdSchema,
+  body: z.string().trim().min(1).max(1_000_000),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ApplicationNoteCreateInput = z.input<typeof ApplicationNoteCreateSchema>;
+
+export const ApplicationNoteUpdateSchema = z.object({
+  id: IdSchema,
+  body: z.string().trim().min(1).max(1_000_000),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ApplicationNoteUpdateInput = z.input<typeof ApplicationNoteUpdateSchema>;
+
+export const ApplicationTaskCreateSchema = z.object({
+  id: IdSchema.optional(),
+  applicationId: IdSchema,
+  title: z.string().trim().min(1).max(2000),
+  notes: z.string().trim().max(50_000).nullable().optional(),
+  dueAt: IsoDateTimeSchema.nullable().optional(),
+  status: z.enum(['open', 'done', 'dismissed']).default('open'),
+  createdAt: IsoDateTimeSchema.optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ApplicationTaskCreateInput = z.input<typeof ApplicationTaskCreateSchema>;
+
+export const ApplicationTaskUpdateSchema = z.object({
+  id: IdSchema,
+  title: z.string().trim().min(1).max(2000).optional(),
+  notes: z.string().trim().max(50_000).nullable().optional(),
+  dueAt: IsoDateTimeSchema.nullable().optional(),
+  status: z.enum(['open', 'done', 'dismissed']).optional(),
+  updatedAt: IsoDateTimeSchema.optional(),
+});
+export type ApplicationTaskUpdateInput = z.input<typeof ApplicationTaskUpdateSchema>;
+
+export const ApplicationDraftCreateSchema = z
+  .object({
+    id: IdSchema.optional(),
+    applicationId: IdSchema,
+    contactId: IdSchema,
+    provider: z.enum(['google', 'microsoft']),
+    accountEmail: EmailSchema,
+    kind: z.enum(['initial', 'reply']),
+    subject: z.string().trim().min(1).max(998),
+    bodyText: z.string().min(1).max(500_000),
+    threadId: z.string().trim().min(1).max(2000).nullable().optional(),
+    replyToMessageId: z.string().trim().min(1).max(2000).nullable().optional(),
+    createdAt: IsoDateTimeSchema.optional(),
+    updatedAt: IsoDateTimeSchema.optional(),
+  })
+  .superRefine((draft, context) => {
+    if (draft.kind === 'reply' && !draft.threadId) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['threadId'],
+        message: 'A reply draft requires a provider thread',
+      });
+    }
+    if (draft.kind === 'initial' && (draft.threadId || draft.replyToMessageId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'An initial draft cannot be attached to a provider thread or message',
+      });
+    }
+  });
+export type ApplicationDraftCreateInput = z.input<typeof ApplicationDraftCreateSchema>;
+
 export const BackupEnvelopeSchema = z.object({
   format: z.literal('outreachr-encrypted-backup'),
   version: z.literal(1),

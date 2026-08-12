@@ -1,6 +1,6 @@
 import type { Database } from 'sql.js';
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export interface Migration {
   readonly version: number;
@@ -1139,6 +1139,189 @@ CREATE TABLE local_preferences (
   value_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+`,
+  },
+  {
+    version: 10,
+    name: 'job_application_workspace_and_lifecycle',
+    sql: `
+CREATE TABLE workspace_profile (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL CHECK(length(trim(display_name)) BETWEEN 1 AND 300),
+  primary_email TEXT NOT NULL CHECK(length(trim(primary_email)) BETWEEN 3 AND 320),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE companies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 500),
+  website TEXT CHECK(website IS NULL OR length(trim(website)) BETWEEN 1 AND 4096),
+  location TEXT CHECK(location IS NULL OR length(trim(location)) BETWEEN 1 AND 1000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX companies_normalized_name_idx ON companies(lower(trim(name)));
+
+CREATE TABLE contacts (
+  id TEXT PRIMARY KEY,
+  company_id TEXT REFERENCES companies(id) ON DELETE SET NULL,
+  name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 500),
+  title TEXT CHECK(title IS NULL OR length(title) <= 500),
+  primary_email TEXT CHECK(primary_email IS NULL OR length(trim(primary_email)) BETWEEN 3 AND 320),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX contacts_company_idx ON contacts(company_id);
+
+CREATE TABLE application_stages (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 200),
+  position INTEGER NOT NULL CHECK(position BETWEEN 0 AND 31),
+  terminal INTEGER NOT NULL DEFAULT 0 CHECK(terminal IN (0,1)),
+  archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(name),
+  UNIQUE(position)
+);
+
+CREATE TABLE application_stage_transitions (
+  from_stage_id TEXT NOT NULL REFERENCES application_stages(id) ON DELETE CASCADE,
+  to_stage_id TEXT NOT NULL REFERENCES application_stages(id) ON DELETE CASCADE,
+  PRIMARY KEY(from_stage_id,to_stage_id),
+  CHECK(from_stage_id != to_stage_id)
+);
+
+CREATE TABLE job_applications (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE RESTRICT,
+  role TEXT NOT NULL CHECK(length(trim(role)) BETWEEN 1 AND 2000),
+  stage_id TEXT NOT NULL REFERENCES application_stages(id) ON DELETE RESTRICT,
+  source_url TEXT CHECK(source_url IS NULL OR length(trim(source_url)) BETWEEN 1 AND 4096),
+  applied_at TEXT,
+  next_event_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX job_applications_company_idx ON job_applications(company_id);
+CREATE INDEX job_applications_stage_time_idx ON job_applications(stage_id,updated_at DESC,id DESC);
+
+CREATE TABLE application_stage_history (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  from_stage_id TEXT REFERENCES application_stages(id) ON DELETE RESTRICT,
+  to_stage_id TEXT NOT NULL REFERENCES application_stages(id) ON DELETE RESTRICT,
+  changed_at TEXT NOT NULL,
+  note TEXT CHECK(note IS NULL OR length(note) <= 10000)
+);
+CREATE INDEX application_stage_history_application_idx
+  ON application_stage_history(application_id,changed_at DESC,id DESC);
+CREATE TRIGGER application_stage_history_is_append_only_update
+BEFORE UPDATE ON application_stage_history
+BEGIN
+  SELECT RAISE(ABORT,'application stage history is append-only');
+END;
+CREATE TRIGGER application_stage_history_is_append_only_delete
+BEFORE DELETE ON application_stage_history
+BEGIN
+  SELECT RAISE(ABORT,'application stage history is append-only');
+END;
+
+CREATE TABLE application_contacts (
+  application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  contact_id TEXT NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
+  relationship TEXT NOT NULL CHECK(length(trim(relationship)) BETWEEN 1 AND 500),
+  primary_contact INTEGER NOT NULL DEFAULT 0 CHECK(primary_contact IN (0,1)),
+  PRIMARY KEY(application_id,contact_id)
+);
+CREATE UNIQUE INDEX application_contacts_one_primary_idx
+  ON application_contacts(application_id) WHERE primary_contact=1;
+
+CREATE TABLE application_threads (
+  application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK(provider IN ('google','microsoft')),
+  account_email TEXT NOT NULL CHECK(length(trim(account_email)) BETWEEN 3 AND 320),
+  provider_thread_id TEXT NOT NULL CHECK(length(trim(provider_thread_id)) BETWEEN 1 AND 2000),
+  subject_snapshot TEXT CHECK(subject_snapshot IS NULL OR length(subject_snapshot) <= 998),
+  linked_at TEXT NOT NULL,
+  PRIMARY KEY(application_id,provider,account_email,provider_thread_id)
+);
+CREATE INDEX application_threads_lookup_idx
+  ON application_threads(provider,account_email,provider_thread_id);
+
+CREATE TABLE application_notes (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  body TEXT NOT NULL CHECK(length(trim(body)) BETWEEN 1 AND 1000000),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX application_notes_application_idx
+  ON application_notes(application_id,created_at DESC,id DESC);
+
+CREATE TABLE application_tasks (
+  id TEXT PRIMARY KEY,
+  application_id TEXT NOT NULL REFERENCES job_applications(id) ON DELETE CASCADE,
+  title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 2000),
+  notes TEXT CHECK(notes IS NULL OR length(notes) <= 50000),
+  due_at TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done','dismissed')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX application_tasks_application_status_idx
+  ON application_tasks(application_id,status,updated_at DESC,id DESC);
+
+-- Application-bound drafts carry exactly one owned job-application context.
+-- Legacy fundraising drafts stay readable with both columns NULL.
+ALTER TABLE messages ADD COLUMN application_id TEXT REFERENCES job_applications(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN application_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT
+  CHECK(reply_to_message_id IS NULL OR length(trim(reply_to_message_id)) BETWEEN 1 AND 2000);
+CREATE INDEX messages_application_idx ON messages(application_id);
+CREATE INDEX messages_application_contact_idx ON messages(application_contact_id);
+CREATE TRIGGER messages_require_one_application_context_insert
+BEFORE INSERT ON messages
+WHEN (NEW.application_id IS NULL) != (NEW.application_contact_id IS NULL)
+BEGIN
+  SELECT RAISE(ABORT,'application drafts require one application and contact context');
+END;
+CREATE TRIGGER messages_require_one_application_context_update
+BEFORE UPDATE OF application_id,application_contact_id ON messages
+WHEN (NEW.application_id IS NULL) != (NEW.application_contact_id IS NULL)
+BEGIN
+  SELECT RAISE(ABORT,'application drafts require one application and contact context');
+END;
+CREATE TRIGGER messages_require_owned_application_contact_insert
+BEFORE INSERT ON messages
+WHEN NEW.application_id IS NOT NULL
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM application_contacts ac
+    WHERE ac.application_id=NEW.application_id AND ac.contact_id=NEW.application_contact_id
+  ) THEN RAISE(ABORT,'application draft contact is not linked to application') END;
+END;
+CREATE TRIGGER messages_require_owned_application_contact_update
+BEFORE UPDATE OF application_id,application_contact_id ON messages
+WHEN NEW.application_id IS NOT NULL
+BEGIN
+  SELECT CASE WHEN NOT EXISTS (
+    SELECT 1 FROM application_contacts ac
+    WHERE ac.application_id=NEW.application_id AND ac.contact_id=NEW.application_contact_id
+  ) THEN RAISE(ABORT,'application draft contact is not linked to application') END;
+END;
+CREATE TRIGGER messages_application_context_is_immutable
+BEFORE UPDATE OF application_id,application_contact_id,reply_to_message_id ON messages
+BEGIN
+  SELECT RAISE(ABORT,'application draft context is immutable');
+END;
+CREATE TRIGGER contacts_clear_application_draft_binding
+BEFORE DELETE ON contacts
+BEGIN
+  UPDATE messages SET application_id=NULL,application_contact_id=NULL
+  WHERE application_contact_id=OLD.id;
+END;
 `,
   },
 ] as const;

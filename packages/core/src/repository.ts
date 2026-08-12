@@ -4,14 +4,27 @@ import type { CoreVault } from './database.js';
 import {
   AgentProposalSchema,
   AgentRunSchema,
+  ApplicationDraftCreateSchema,
+  ApplicationNoteCreateSchema,
+  ApplicationNoteUpdateSchema,
+  ApplicationStageSchema,
+  ApplicationStageTransitionSetSchema,
+  ApplicationTaskCreateSchema,
+  ApplicationTaskUpdateSchema,
   ClaimSchema,
+  CompanySchema,
   ConnectorConfigSchema,
   ContactMethodSchema,
+  ContactSchema,
+  CreateJobApplicationSchema,
   FirmSchema,
   FounderProfileSchema,
   FundSchema,
   IdSchema,
   KnowledgeItemSchema,
+  LinkApplicationContactSchema,
+  LinkApplicationThreadSchema,
+  ListJobApplicationsSchema,
   ListSchema,
   MeetingSchema,
   MessageDraftSchema,
@@ -25,16 +38,34 @@ import {
   SuppressionSchema,
   TargetSchema,
   TaskSchema,
+  TransitionJobApplicationSchema,
+  UnlinkApplicationContactSchema,
+  UnlinkApplicationThreadSchema,
+  UpdateJobApplicationSchema,
+  WorkspaceSetupSchema,
   type AgentProposalInput,
   type AgentRunInput,
+  type ApplicationDraftCreateInput,
+  type ApplicationNoteCreateInput,
+  type ApplicationNoteUpdateInput,
+  type ApplicationStageInput,
+  type ApplicationStageTransitionSetInput,
+  type ApplicationTaskCreateInput,
+  type ApplicationTaskUpdateInput,
   type ClaimInput,
+  type CompanyInput,
   type ConnectorConfigInput,
+  type ContactInput,
   type ContactMethodInput,
+  type CreateJobApplicationInput,
   type FirmInput,
   type FounderProfileInput,
   type FundInput,
   type KnowledgeItemInput,
+  type LinkApplicationContactInput,
+  type LinkApplicationThreadInput,
   type ListInput,
+  type ListJobApplicationsInput,
   type MeetingInput,
   type MessageDraftInput,
   type NoteInput,
@@ -44,6 +75,11 @@ import {
   type SuppressionInput,
   type TargetInput,
   type TaskInput,
+  type TransitionJobApplicationInput,
+  type UnlinkApplicationContactInput,
+  type UnlinkApplicationThreadInput,
+  type UpdateJobApplicationInput,
+  type WorkspaceSetupInput,
 } from './validation.js';
 
 const TagInputSchema = z.object({
@@ -358,6 +394,179 @@ export function approvalContentHash(message: {
     }),
   );
 }
+
+export interface WorkspaceProfile {
+  id: string;
+  displayName: string;
+  primaryEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceSetupResult {
+  profile: WorkspaceProfile;
+  stages: ApplicationStageRecord[];
+}
+
+export interface CompanyRecord {
+  id: string;
+  name: string;
+  website: string | null;
+  location: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContactRecord {
+  id: string;
+  companyId: string | null;
+  name: string;
+  title: string | null;
+  primaryEmail: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationStageRecord {
+  id: string;
+  name: string;
+  position: number;
+  terminal: boolean;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationStageHistoryItem {
+  id: string;
+  applicationId: string;
+  fromStageId: string | null;
+  toStageId: string;
+  changedAt: string;
+  note: string | null;
+}
+
+export interface ApplicationThreadLink {
+  applicationId: string;
+  provider: 'google' | 'microsoft';
+  accountEmail: string;
+  providerThreadId: string;
+  subjectSnapshot: string | null;
+  linkedAt: string;
+}
+
+export interface ApplicationNote {
+  id: string;
+  applicationId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationTask {
+  id: string;
+  applicationId: string;
+  title: string;
+  notes: string | null;
+  dueAt: string | null;
+  status: 'open' | 'done' | 'dismissed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationContactLink {
+  contact: ContactRecord;
+  relationship: string;
+  primary: boolean;
+}
+
+export interface ApplicationSummary {
+  id: string;
+  companyId: string;
+  companyName: string;
+  role: string;
+  stageId: string;
+  stageName: string;
+  sourceUrl: string | null;
+  appliedAt: string | null;
+  nextEventAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationDetail extends ApplicationSummary {
+  company: CompanyRecord;
+  contacts: Array<ContactRecord & { relationship: string; primary: boolean }>;
+  threads: ApplicationThreadLink[];
+  notes: ApplicationNote[];
+  tasks: ApplicationTask[];
+  stageHistory: ApplicationStageHistoryItem[];
+}
+
+export interface ApplicationListPage {
+  applications: ApplicationSummary[];
+  nextCursor: string | null;
+}
+
+export interface ApplicationDraftRecord {
+  id: string;
+  applicationId: string;
+  contactId: string;
+  provider: 'google' | 'microsoft';
+  accountEmail: string;
+  recipientName: string;
+  recipientEmail: string;
+  kind: 'initial' | 'reply';
+  subject: string;
+  bodyText: string;
+  threadId: string | null;
+  replyToMessageId: string | null;
+  contentHash: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function likeEscaped(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function encodeApplicationCursor(updatedAt: string, id: string): string {
+  return Buffer.from(stableJson({ u: updatedAt, i: id })).toString('base64url');
+}
+
+function decodeApplicationCursor(cursor: string): { updatedAt: string; id: string } | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      u?: unknown;
+      i?: unknown;
+    };
+    if (typeof parsed.u !== 'string' || typeof parsed.i !== 'string') return null;
+    return { updatedAt: parsed.u, id: parsed.i };
+  } catch {
+    return null;
+  }
+}
+
+interface ApplicationSummaryRow {
+  id: string;
+  companyId: string;
+  companyName: string;
+  role: string;
+  stageId: string;
+  stageName: string;
+  sourceUrl: string | null;
+  appliedAt: string | null;
+  nextEventAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const APPLICATION_SUMMARY_SELECT = `SELECT j.id,j.company_id AS companyId,c.name AS companyName,j.role,j.stage_id AS stageId,
+  s.name AS stageName,j.source_url AS sourceUrl,j.applied_at AS appliedAt,j.next_event_at AS nextEventAt,
+  j.created_at AS createdAt,j.updated_at AS updatedAt
+FROM job_applications j
+JOIN companies c ON c.id=j.company_id
+JOIN application_stages s ON s.id=j.stage_id`;
 
 export class OutreachrRepository {
   constructor(readonly vault: CoreVault) {}
@@ -1464,5 +1673,835 @@ export class OutreachrRepository {
       [IdSchema.parse(roundId)],
     );
     return Object.fromEntries(rows.map((row) => [row.stage, Number(row.count)]));
+  }
+
+  // ---- Job application workspace ----
+
+  workspaceProfile(): WorkspaceProfile {
+    const row = this.vault.one<{
+      id: string;
+      display_name: string;
+      primary_email: string;
+      created_at: string;
+      updated_at: string;
+    }>('SELECT id,display_name,primary_email,created_at,updated_at FROM workspace_profile');
+    if (!row) throw new Error('Workspace is not set up');
+    return {
+      id: row.id,
+      displayName: row.display_name,
+      primaryEmail: row.primary_email,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  setupWorkspace(input: WorkspaceSetupInput, at: string): WorkspaceSetupResult {
+    const value = WorkspaceSetupSchema.parse(input);
+    if (this.vault.one('SELECT id FROM workspace_profile')) {
+      throw new Error('Workspace is already set up');
+    }
+    const seen = new Set<string>();
+    for (const stage of value.stages) {
+      const key = stage.name.trim().toLocaleLowerCase('en-US');
+      if (seen.has(key)) throw new Error('Stage names must be unique');
+      seen.add(key);
+    }
+    const profileId = 'workspace';
+    this.vault.transaction(() => {
+      this.vault.run(
+        'INSERT INTO workspace_profile(id,display_name,primary_email,created_at,updated_at) VALUES (?,?,?,?,?)',
+        [profileId, value.displayName, value.primaryEmail, at, at],
+      );
+      const stageIds: string[] = [];
+      value.stages.forEach((stage, index) => {
+        const stageId = `stage:${randomUUID()}`;
+        stageIds.push(stageId);
+        this.vault.run(
+          'INSERT INTO application_stages(id,name,position,terminal,archived,created_at,updated_at) VALUES (?,?,?,?,0,?,?)',
+          [stageId, stage.name, index, bool(stage.terminal), at, at],
+        );
+      });
+      for (let index = 0; index < stageIds.length - 1; index += 1) {
+        const fromStageId = stageIds[index];
+        const toStageId = stageIds[index + 1];
+        const source = value.stages[index];
+        if (!fromStageId || !toStageId || !source || source.terminal) continue;
+        this.vault.run(
+          'INSERT INTO application_stage_transitions(from_stage_id,to_stage_id) VALUES (?,?)',
+          [fromStageId, toStageId],
+        );
+      }
+      this.audit(
+        'workspace.setup',
+        'workspace',
+        profileId,
+        { displayName: value.displayName, stages: value.stages.map((stage) => stage.name) },
+        at,
+      );
+    });
+    return { profile: this.workspaceProfile(), stages: this.listApplicationStages() };
+  }
+
+  // ---- Companies ----
+
+  listCompanies(): CompanyRecord[] {
+    return this.vault.all<CompanyRecord>(
+      'SELECT id,name,website,location,created_at AS createdAt,updated_at AS updatedAt FROM companies ORDER BY lower(trim(name)),id',
+    );
+  }
+
+  createCompany(input: CompanyInput, at: string): CompanyRecord {
+    const value = CompanySchema.parse(input);
+    const id = value.id ?? `company:${randomUUID()}`;
+    this.vault.run(
+      'INSERT INTO companies(id,name,website,location,created_at,updated_at) VALUES (?,?,?,?,?,?)',
+      [id, value.name, value.website ?? null, value.location ?? null, at, at],
+    );
+    this.audit('company.create', 'company', id, { name: value.name }, at);
+    return this.company(id);
+  }
+
+  updateCompany(input: CompanyInput & { id: string }, at: string): CompanyRecord {
+    const value = CompanySchema.parse(input);
+    if (!value.id) throw new Error('Company id is required');
+    if (!this.vault.one('SELECT id FROM companies WHERE id=?', [value.id])) {
+      throw new Error(`Company ${value.id} does not exist`);
+    }
+    this.vault.run('UPDATE companies SET name=?,website=?,location=?,updated_at=? WHERE id=?', [
+      value.name,
+      value.website ?? null,
+      value.location ?? null,
+      at,
+      value.id,
+    ]);
+    this.audit('company.update', 'company', value.id, { name: value.name }, at);
+    return this.company(value.id);
+  }
+
+  private company(id: string): CompanyRecord {
+    const row = this.vault.one<CompanyRecord>(
+      'SELECT id,name,website,location,created_at AS createdAt,updated_at AS updatedAt FROM companies WHERE id=?',
+      [id],
+    );
+    if (!row) throw new Error(`Company ${id} does not exist`);
+    return row;
+  }
+
+  // ---- Contacts ----
+
+  listContacts(): ContactRecord[] {
+    return this.vault.all<ContactRecord>(
+      'SELECT id,company_id AS companyId,name,title,primary_email AS primaryEmail,created_at AS createdAt,updated_at AS updatedAt FROM contacts ORDER BY lower(trim(name)),id',
+    );
+  }
+
+  createContact(input: ContactInput, at: string): ContactRecord {
+    const value = ContactSchema.parse(input);
+    const id = value.id ?? `contact:${randomUUID()}`;
+    this.vault.run(
+      'INSERT INTO contacts(id,company_id,name,title,primary_email,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+      [id, value.companyId ?? null, value.name, value.title ?? null, value.primaryEmail ?? null, at, at],
+    );
+    this.audit('contact.create', 'contact', id, { name: value.name }, at);
+    return this.contact(id);
+  }
+
+  updateContact(input: ContactInput & { id: string }, at: string): ContactRecord {
+    const value = ContactSchema.parse(input);
+    if (!value.id) throw new Error('Contact id is required');
+    if (!this.vault.one('SELECT id FROM contacts WHERE id=?', [value.id])) {
+      throw new Error(`Contact ${value.id} does not exist`);
+    }
+    this.vault.run(
+      'UPDATE contacts SET company_id=?,name=?,title=?,primary_email=?,updated_at=? WHERE id=?',
+      [value.companyId ?? null, value.name, value.title ?? null, value.primaryEmail ?? null, at, value.id],
+    );
+    this.audit('contact.update', 'contact', value.id, { name: value.name }, at);
+    return this.contact(value.id);
+  }
+
+  private contact(id: string): ContactRecord {
+    const row = this.vault.one<ContactRecord>(
+      'SELECT id,company_id AS companyId,name,title,primary_email AS primaryEmail,created_at AS createdAt,updated_at AS updatedAt FROM contacts WHERE id=?',
+      [id],
+    );
+    if (!row) throw new Error(`Contact ${id} does not exist`);
+    return row;
+  }
+
+  // ---- Application stages ----
+
+  listApplicationStages(): ApplicationStageRecord[] {
+    const rows = this.vault.all<{
+      id: string;
+      name: string;
+      position: number;
+      terminal: number;
+      archived: number;
+      createdAt: string;
+      updatedAt: string;
+    }>(
+      'SELECT id,name,position,terminal,archived,created_at AS createdAt,updated_at AS updatedAt FROM application_stages ORDER BY position,id',
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      position: row.position,
+      terminal: row.terminal === 1,
+      archived: row.archived === 1,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  createApplicationStage(input: ApplicationStageInput, at: string): ApplicationStageRecord {
+    const value = ApplicationStageSchema.parse(input);
+    const id = value.id ?? `stage:${randomUUID()}`;
+    this.vault.run(
+      'INSERT INTO application_stages(id,name,position,terminal,archived,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+      [id, value.name, value.position, bool(value.terminal), bool(value.archived ?? false), at, at],
+    );
+    this.audit(
+      'application_stage.create',
+      'application_stage',
+      id,
+      { name: value.name, position: value.position, terminal: value.terminal },
+      at,
+    );
+    return this.applicationStage(id);
+  }
+
+  updateApplicationStage(input: ApplicationStageInput & { id: string }, at: string): ApplicationStageRecord {
+    const value = ApplicationStageSchema.parse(input);
+    if (!value.id) throw new Error('Application stage id is required');
+    if (!this.vault.one('SELECT id FROM application_stages WHERE id=?', [value.id])) {
+      throw new Error(`Application stage ${value.id} does not exist`);
+    }
+    this.vault.run(
+      'UPDATE application_stages SET name=?,position=?,terminal=?,archived=?,updated_at=? WHERE id=?',
+      [value.name, value.position, bool(value.terminal), bool(value.archived ?? false), at, value.id],
+    );
+    this.audit(
+      'application_stage.update',
+      'application_stage',
+      value.id,
+      { name: value.name, position: value.position, terminal: value.terminal, archived: value.archived ?? false },
+      at,
+    );
+    return this.applicationStage(value.id);
+  }
+
+  private applicationStage(id: string): ApplicationStageRecord {
+    const row = this.vault.one<{
+      id: string;
+      name: string;
+      position: number;
+      terminal: number;
+      archived: number;
+      createdAt: string;
+      updatedAt: string;
+    }>(
+      'SELECT id,name,position,terminal,archived,created_at AS createdAt,updated_at AS updatedAt FROM application_stages WHERE id=?',
+      [id],
+    );
+    if (!row) throw new Error(`Application stage ${id} does not exist`);
+    return {
+      id: row.id,
+      name: row.name,
+      position: row.position,
+      terminal: row.terminal === 1,
+      archived: row.archived === 1,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  setApplicationStageTransition(
+    input: ApplicationStageTransitionSetInput,
+    at: string,
+  ): { allowed: boolean } {
+    const value = ApplicationStageTransitionSetSchema.parse(input);
+    const from = this.vault.one<{ terminal: number }>(
+      'SELECT terminal FROM application_stages WHERE id=?',
+      [value.fromStageId],
+    );
+    if (!from) throw new Error(`Application stage ${value.fromStageId} does not exist`);
+    if (!this.vault.one('SELECT id FROM application_stages WHERE id=?', [value.toStageId])) {
+      throw new Error(`Application stage ${value.toStageId} does not exist`);
+    }
+    if (value.allowed) {
+      if (from.terminal === 1) {
+        throw new Error('Terminal stages cannot have outgoing transitions');
+      }
+      this.vault.run(
+        'INSERT INTO application_stage_transitions(from_stage_id,to_stage_id) VALUES (?,?) ON CONFLICT(from_stage_id,to_stage_id) DO NOTHING',
+        [value.fromStageId, value.toStageId],
+      );
+    } else {
+      this.vault.run(
+        'DELETE FROM application_stage_transitions WHERE from_stage_id=? AND to_stage_id=?',
+        [value.fromStageId, value.toStageId],
+      );
+    }
+    this.audit(
+      'application_stage.transition.set',
+      'application_stage',
+      value.fromStageId,
+      { fromStageId: value.fromStageId, toStageId: value.toStageId, allowed: value.allowed },
+      at,
+    );
+    return { allowed: value.allowed };
+  }
+
+  // ---- Job applications ----
+
+  createJobApplication(input: CreateJobApplicationInput, at: string): ApplicationDetail {
+    const value = CreateJobApplicationSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM workspace_profile')) {
+      throw new Error('Workspace must be set up before creating applications');
+    }
+    const stage = this.vault.one<{ archived: number }>(
+      'SELECT archived FROM application_stages WHERE id=?',
+      [value.stageId],
+    );
+    if (!stage) throw new Error(`Application stage ${value.stageId} does not exist`);
+    if (stage.archived === 1) throw new Error('Cannot create an application in an archived stage');
+    if (!this.vault.one('SELECT id FROM companies WHERE id=?', [value.companyId])) {
+      throw new Error(`Company ${value.companyId} does not exist`);
+    }
+    const id = value.id ?? `application:${randomUUID()}`;
+    this.vault.transaction(() => {
+      this.vault.run(
+        'INSERT INTO job_applications(id,company_id,role,stage_id,source_url,applied_at,next_event_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        [
+          id,
+          value.companyId,
+          value.role,
+          value.stageId,
+          value.sourceUrl ?? null,
+          value.appliedAt ?? null,
+          value.nextEventAt ?? null,
+          at,
+          at,
+        ],
+      );
+      this.vault.run(
+        'INSERT INTO application_stage_history(id,application_id,from_stage_id,to_stage_id,changed_at,note) VALUES (?,?,NULL,?,?,NULL)',
+        [`history:${randomUUID()}`, id, value.stageId, at],
+      );
+      this.audit(
+        'application.create',
+        'application',
+        id,
+        { companyId: value.companyId, stageId: value.stageId, role: value.role },
+        at,
+      );
+    });
+    return this.loadApplicationDetail(id);
+  }
+
+  getJobApplication(id: string): ApplicationDetail {
+    const value = IdSchema.parse(id);
+    return this.loadApplicationDetail(value);
+  }
+
+  listJobApplications(input: ListJobApplicationsInput): ApplicationListPage {
+    const value = ListJobApplicationsSchema.parse(input);
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+    if (value.query) {
+      const pattern = `%${likeEscaped(value.query.toLocaleLowerCase('en-US'))}%`;
+      conditions.push("(lower(c.name) LIKE ? ESCAPE '\\' OR lower(j.role) LIKE ? ESCAPE '\\')");
+      params.push(pattern, pattern);
+    }
+    if (value.stageIds && value.stageIds.length > 0) {
+      conditions.push(`j.stage_id IN (${value.stageIds.map(() => '?').join(',')})`);
+      params.push(...value.stageIds);
+    }
+    if (value.companyId) {
+      conditions.push('j.company_id=?');
+      params.push(value.companyId);
+    }
+    if (value.taskStatus) {
+      conditions.push(
+        'EXISTS (SELECT 1 FROM application_tasks t WHERE t.application_id=j.id AND t.status=?)',
+      );
+      params.push(value.taskStatus);
+    }
+    if (value.cursor) {
+      const cursor = decodeApplicationCursor(value.cursor);
+      if (!cursor) throw new Error('Invalid application list cursor');
+      conditions.push('(j.updated_at < ? OR (j.updated_at = ? AND j.id < ?))');
+      params.push(cursor.updatedAt, cursor.updatedAt, cursor.id);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.vault.all<ApplicationSummaryRow>(
+      `${APPLICATION_SUMMARY_SELECT} ${where} ORDER BY j.updated_at DESC,j.id DESC LIMIT ?`,
+      [...params, value.limit + 1],
+    );
+    const hasMore = rows.length > value.limit;
+    const page = hasMore ? rows.slice(0, value.limit) : rows;
+    const applications = page.map((row) => this.summaryFromRow(row));
+    const last = page[page.length - 1];
+    return {
+      applications,
+      nextCursor: hasMore && last ? encodeApplicationCursor(last.updatedAt, last.id) : null,
+    };
+  }
+
+  updateJobApplication(input: UpdateJobApplicationInput, at: string): ApplicationDetail {
+    const value = UpdateJobApplicationSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.id])) {
+      throw new Error(`Job application ${value.id} does not exist`);
+    }
+    const updates: string[] = [];
+    const params: Array<string | number | null> = [];
+    const changed: string[] = [];
+    if (value.companyId !== undefined) {
+      updates.push('company_id=?');
+      params.push(value.companyId);
+      changed.push('companyId');
+    }
+    if (value.role !== undefined) {
+      updates.push('role=?');
+      params.push(value.role);
+      changed.push('role');
+    }
+    if (value.sourceUrl !== undefined) {
+      updates.push('source_url=?');
+      params.push(value.sourceUrl);
+      changed.push('sourceUrl');
+    }
+    if (value.appliedAt !== undefined) {
+      updates.push('applied_at=?');
+      params.push(value.appliedAt);
+      changed.push('appliedAt');
+    }
+    if (value.nextEventAt !== undefined) {
+      updates.push('next_event_at=?');
+      params.push(value.nextEventAt);
+      changed.push('nextEventAt');
+    }
+    if (updates.length === 0) throw new Error('No application fields to update');
+    updates.push('updated_at=?');
+    params.push(at, value.id);
+    this.vault.run(`UPDATE job_applications SET ${updates.join(',')} WHERE id=?`, params);
+    this.audit('application.update', 'application', value.id, { updated: changed }, at);
+    return this.loadApplicationDetail(value.id);
+  }
+
+  transitionJobApplication(input: TransitionJobApplicationInput, at: string): ApplicationDetail {
+    const value = TransitionJobApplicationSchema.parse(input);
+    const application = this.vault.one<{ stage_id: string }>(
+      'SELECT stage_id FROM job_applications WHERE id=?',
+      [value.id],
+    );
+    if (!application) throw new Error(`Job application ${value.id} does not exist`);
+    if (application.stage_id === value.toStageId) {
+      throw new Error('Job application is already in that stage');
+    }
+    const target = this.vault.one<{ archived: number }>(
+      'SELECT archived FROM application_stages WHERE id=?',
+      [value.toStageId],
+    );
+    if (!target) throw new Error(`Application stage ${value.toStageId} does not exist`);
+    if (target.archived === 1) throw new Error('Cannot transition into an archived stage');
+    if (
+      !this.vault.one(
+        'SELECT 1 FROM application_stage_transitions WHERE from_stage_id=? AND to_stage_id=?',
+        [application.stage_id, value.toStageId],
+      )
+    ) {
+      throw new Error('Stage transition is not allowed');
+    }
+    this.vault.transaction(() => {
+      this.vault.run('UPDATE job_applications SET stage_id=?,updated_at=? WHERE id=?', [
+        value.toStageId,
+        at,
+        value.id,
+      ]);
+      this.vault.run(
+        'INSERT INTO application_stage_history(id,application_id,from_stage_id,to_stage_id,changed_at,note) VALUES (?,?,?,?,?,?)',
+        [`history:${randomUUID()}`, value.id, application.stage_id, value.toStageId, at, value.note ?? null],
+      );
+      this.audit(
+        'application.transition',
+        'application',
+        value.id,
+        { fromStageId: application.stage_id, toStageId: value.toStageId },
+        at,
+      );
+    });
+    return this.loadApplicationDetail(value.id);
+  }
+
+  // ---- Application relationships ----
+
+  linkApplicationContact(input: LinkApplicationContactInput, at: string): ApplicationDetail {
+    const value = LinkApplicationContactSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    if (!this.vault.one('SELECT id FROM contacts WHERE id=?', [value.contactId])) {
+      throw new Error(`Contact ${value.contactId} does not exist`);
+    }
+    this.vault.transaction(() => {
+      if (value.primary) {
+        this.vault.run(
+          'UPDATE application_contacts SET primary_contact=0 WHERE application_id=?',
+          [value.applicationId],
+        );
+      }
+      this.vault.run(
+        `INSERT INTO application_contacts(application_id,contact_id,relationship,primary_contact) VALUES (?,?,?,?)
+         ON CONFLICT(application_id,contact_id) DO UPDATE SET relationship=excluded.relationship,primary_contact=excluded.primary_contact`,
+        [value.applicationId, value.contactId, value.relationship, bool(value.primary)],
+      );
+      this.audit(
+        'application.contact.link',
+        'application',
+        value.applicationId,
+        { contactId: value.contactId, primary: value.primary },
+        at,
+      );
+    });
+    return this.loadApplicationDetail(value.applicationId);
+  }
+
+  unlinkApplicationContact(input: UnlinkApplicationContactInput, at: string): ApplicationDetail {
+    const value = UnlinkApplicationContactSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    this.vault.run(
+      'DELETE FROM application_contacts WHERE application_id=? AND contact_id=?',
+      [value.applicationId, value.contactId],
+    );
+    this.audit(
+      'application.contact.unlink',
+      'application',
+      value.applicationId,
+      { contactId: value.contactId },
+      at,
+    );
+    return this.loadApplicationDetail(value.applicationId);
+  }
+
+  linkApplicationThread(input: LinkApplicationThreadInput, at: string): ApplicationDetail {
+    const value = LinkApplicationThreadSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    if (
+      this.vault.one(
+        'SELECT 1 FROM application_threads WHERE application_id=? AND provider=? AND account_email=? AND provider_thread_id=?',
+        [value.applicationId, value.provider, value.accountEmail, value.providerThreadId],
+      )
+    ) {
+      throw new Error('Thread is already linked to this application');
+    }
+    this.vault.run(
+      'INSERT INTO application_threads(application_id,provider,account_email,provider_thread_id,subject_snapshot,linked_at) VALUES (?,?,?,?,?,?)',
+      [
+        value.applicationId,
+        value.provider,
+        value.accountEmail,
+        value.providerThreadId,
+        value.subjectSnapshot ?? null,
+        at,
+      ],
+    );
+    this.audit(
+      'application.thread.link',
+      'application',
+      value.applicationId,
+      { provider: value.provider, providerThreadId: value.providerThreadId },
+      at,
+    );
+    return this.loadApplicationDetail(value.applicationId);
+  }
+
+  unlinkApplicationThread(input: UnlinkApplicationThreadInput, at: string): ApplicationDetail {
+    const value = UnlinkApplicationThreadSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    this.vault.run(
+      'DELETE FROM application_threads WHERE application_id=? AND provider=? AND account_email=? AND provider_thread_id=?',
+      [value.applicationId, value.provider, value.accountEmail, value.providerThreadId],
+    );
+    this.audit(
+      'application.thread.unlink',
+      'application',
+      value.applicationId,
+      { provider: value.provider, providerThreadId: value.providerThreadId },
+      at,
+    );
+    return this.loadApplicationDetail(value.applicationId);
+  }
+
+  // ---- Application notes ----
+
+  createApplicationNote(input: ApplicationNoteCreateInput, at: string): ApplicationNote {
+    const value = ApplicationNoteCreateSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    const id = value.id ?? `note:${randomUUID()}`;
+    this.vault.run(
+      'INSERT INTO application_notes(id,application_id,body,created_at,updated_at) VALUES (?,?,?,?,?)',
+      [id, value.applicationId, value.body, at, at],
+    );
+    this.audit('application.note.create', 'application_note', id, { applicationId: value.applicationId }, at);
+    return this.applicationNote(id);
+  }
+
+  updateApplicationNote(input: ApplicationNoteUpdateInput, at: string): ApplicationNote {
+    const value = ApplicationNoteUpdateSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM application_notes WHERE id=?', [value.id])) {
+      throw new Error(`Application note ${value.id} does not exist`);
+    }
+    this.vault.run('UPDATE application_notes SET body=?,updated_at=? WHERE id=?', [
+      value.body,
+      at,
+      value.id,
+    ]);
+    this.audit('application.note.update', 'application_note', value.id, {}, at);
+    return this.applicationNote(value.id);
+  }
+
+  private applicationNote(id: string): ApplicationNote {
+    const row = this.vault.one<ApplicationNote>(
+      'SELECT id,application_id AS applicationId,body,created_at AS createdAt,updated_at AS updatedAt FROM application_notes WHERE id=?',
+      [id],
+    );
+    if (!row) throw new Error(`Application note ${id} does not exist`);
+    return row;
+  }
+
+  // ---- Application tasks ----
+
+  createApplicationTask(input: ApplicationTaskCreateInput, at: string): ApplicationTask {
+    const value = ApplicationTaskCreateSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    const id = value.id ?? `task:${randomUUID()}`;
+    this.vault.run(
+      'INSERT INTO application_tasks(id,application_id,title,notes,due_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
+      [id, value.applicationId, value.title, value.notes ?? null, value.dueAt ?? null, value.status, at, at],
+    );
+    this.audit('application.task.create', 'application_task', id, { applicationId: value.applicationId }, at);
+    return this.applicationTask(id);
+  }
+
+  updateApplicationTask(input: ApplicationTaskUpdateInput, at: string): ApplicationTask {
+    const value = ApplicationTaskUpdateSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM application_tasks WHERE id=?', [value.id])) {
+      throw new Error(`Application task ${value.id} does not exist`);
+    }
+    const updates: string[] = [];
+    const params: Array<string | number | null> = [];
+    if (value.title !== undefined) {
+      updates.push('title=?');
+      params.push(value.title);
+    }
+    if (value.notes !== undefined) {
+      updates.push('notes=?');
+      params.push(value.notes);
+    }
+    if (value.dueAt !== undefined) {
+      updates.push('due_at=?');
+      params.push(value.dueAt);
+    }
+    if (value.status !== undefined) {
+      updates.push('status=?');
+      params.push(value.status);
+    }
+    if (updates.length === 0) throw new Error('No application task fields to update');
+    updates.push('updated_at=?');
+    params.push(at, value.id);
+    this.vault.run(`UPDATE application_tasks SET ${updates.join(',')} WHERE id=?`, params);
+    this.audit('application.task.update', 'application_task', value.id, {}, at);
+    return this.applicationTask(value.id);
+  }
+
+  private applicationTask(id: string): ApplicationTask {
+    const row = this.vault.one<ApplicationTask>(
+      'SELECT id,application_id AS applicationId,title,notes,due_at AS dueAt,status,created_at AS createdAt,updated_at AS updatedAt FROM application_tasks WHERE id=?',
+      [id],
+    );
+    if (!row) throw new Error(`Application task ${id} does not exist`);
+    return row;
+  }
+
+  // ---- Application-bound drafts ----
+
+  createApplicationDraft(input: ApplicationDraftCreateInput, at: string): ApplicationDraftRecord {
+    const value = ApplicationDraftCreateSchema.parse(input);
+    if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
+      throw new Error(`Job application ${value.applicationId} does not exist`);
+    }
+    if (
+      !this.vault.one(
+        'SELECT 1 FROM application_contacts WHERE application_id=? AND contact_id=?',
+        [value.applicationId, value.contactId],
+      )
+    ) {
+      throw new Error('Draft contact is not linked to this application');
+    }
+    const contact = this.vault.one<{ name: string; primary_email: string | null }>(
+      'SELECT name,primary_email FROM contacts WHERE id=?',
+      [value.contactId],
+    );
+    if (!contact) throw new Error(`Contact ${value.contactId} does not exist`);
+    if (!contact.primary_email) throw new Error('Draft contact must have a primary email');
+    const id = value.id ?? `draft:${randomUUID()}`;
+    const recipientEmail = normalizeEmail(contact.primary_email);
+    const senderNormalized = normalizeEmail(value.accountEmail);
+    const threadId = value.threadId ?? null;
+    const contentHash = approvalContentHash({
+      recipientAddress: recipientEmail,
+      recipientPersonId: null,
+      provider: value.provider,
+      senderAddress: value.accountEmail,
+      messageKind: value.kind,
+      providerThreadId: threadId,
+      subject: value.subject,
+      bodyText: value.bodyText,
+      attachments: [],
+    });
+    this.vault.run(
+      `INSERT INTO messages(id,round_id,target_id,recipient_person_id,recipient_address,recipient_normalized,provider,sender_address,sender_normalized,message_kind,provider_thread_id,reply_to_message_id,subject,body_text,attachments_json,state,application_id,application_contact_id,created_at,updated_at)
+       VALUES (?,NULL,NULL,NULL,?,?,?,?,?,?,?,?,?,?, '[]','draft',?,?,?,?)`,
+      [
+        id,
+        recipientEmail,
+        recipientEmail,
+        value.provider,
+        value.accountEmail,
+        senderNormalized,
+        value.kind,
+        threadId,
+        value.replyToMessageId ?? null,
+        value.subject,
+        value.bodyText,
+        value.applicationId,
+        value.contactId,
+        at,
+        at,
+      ],
+    );
+    this.audit(
+      'application.draft.create',
+      'application',
+      value.applicationId,
+      { draftId: id, contactId: value.contactId, provider: value.provider, kind: value.kind },
+      at,
+    );
+    return {
+      id,
+      applicationId: value.applicationId,
+      contactId: value.contactId,
+      provider: value.provider,
+      accountEmail: value.accountEmail,
+      recipientName: contact.name,
+      recipientEmail,
+      kind: value.kind,
+      subject: value.subject,
+      bodyText: value.bodyText,
+      threadId,
+      replyToMessageId: value.replyToMessageId ?? null,
+      contentHash,
+      createdAt: at,
+      updatedAt: at,
+    };
+  }
+
+  // ---- Shared application loading ----
+
+  private summaryFromRow(row: ApplicationSummaryRow): ApplicationSummary {
+    return {
+      id: row.id,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      role: row.role,
+      stageId: row.stageId,
+      stageName: row.stageName,
+      sourceUrl: row.sourceUrl ?? null,
+      appliedAt: row.appliedAt ?? null,
+      nextEventAt: row.nextEventAt ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private loadApplicationDetail(id: string): ApplicationDetail {
+    const summary = this.vault.one<ApplicationSummaryRow>(
+      `${APPLICATION_SUMMARY_SELECT} WHERE j.id=?`,
+      [id],
+    );
+    if (!summary) throw new Error(`Job application ${id} does not exist`);
+    const company = this.company(summary.companyId);
+    const contactRows = this.vault.all<{
+      id: string;
+      companyId: string | null;
+      name: string;
+      title: string | null;
+      primaryEmail: string | null;
+      createdAt: string;
+      updatedAt: string;
+      relationship: string;
+      isPrimary: number;
+    }>(
+      `SELECT c.id,c.company_id AS companyId,c.name,c.title,c.primary_email AS primaryEmail,c.created_at AS createdAt,c.updated_at AS updatedAt,
+        ac.relationship,ac.primary_contact AS isPrimary
+       FROM application_contacts ac JOIN contacts c ON c.id=ac.contact_id
+       WHERE ac.application_id=? ORDER BY ac.primary_contact DESC,c.name,c.id`,
+      [id],
+    );
+    const contacts = contactRows.map((row) => {
+      const { relationship, isPrimary, ...contact } = row;
+      return {
+        ...contact,
+        companyId: contact.companyId ?? null,
+        title: contact.title ?? null,
+        primaryEmail: contact.primaryEmail ?? null,
+        relationship,
+        primary: isPrimary === 1,
+      };
+    });
+    const threads = this.vault
+      .all<ApplicationThreadLink>(
+        `SELECT application_id AS applicationId,provider,account_email AS accountEmail,provider_thread_id AS providerThreadId,
+          subject_snapshot AS subjectSnapshot,linked_at AS linkedAt
+         FROM application_threads WHERE application_id=? ORDER BY linked_at,provider,provider_thread_id`,
+        [id],
+      )
+      .map((row) => ({ ...row, subjectSnapshot: row.subjectSnapshot ?? null }));
+    const notes = this.vault.all<ApplicationNote>(
+      'SELECT id,application_id AS applicationId,body,created_at AS createdAt,updated_at AS updatedAt FROM application_notes WHERE application_id=? ORDER BY created_at,id',
+      [id],
+    );
+    const tasks = this.vault.all<ApplicationTask>(
+      'SELECT id,application_id AS applicationId,title,notes,due_at AS dueAt,status,created_at AS createdAt,updated_at AS updatedAt FROM application_tasks WHERE application_id=? ORDER BY created_at,id',
+      [id],
+    );
+    const stageHistory = this.vault
+      .all<ApplicationStageHistoryItem>(
+        `SELECT id,application_id AS applicationId,from_stage_id AS fromStageId,to_stage_id AS toStageId,changed_at AS changedAt,note
+         FROM application_stage_history WHERE application_id=? ORDER BY changed_at,id`,
+        [id],
+      )
+      .map((row) => ({ ...row, fromStageId: row.fromStageId ?? null, note: row.note ?? null }));
+    return {
+      ...this.summaryFromRow(summary),
+      company,
+      contacts,
+      threads,
+      notes,
+      tasks,
+      stageHistory,
+    };
   }
 }
