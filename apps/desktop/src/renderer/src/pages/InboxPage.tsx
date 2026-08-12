@@ -525,7 +525,16 @@ export function InboxPage(): React.JSX.Element {
                   <button
                     type="button"
                     className="inbox-back-button"
-                    onClick={() => setShowMobileDetail(false)}
+                    onClick={() => {
+                      if (activeDetailRequestIdRef.current) {
+                        void window.outreachr?.cancelMailRequest(activeDetailRequestIdRef.current);
+                        activeDetailRequestIdRef.current = null;
+                      }
+                      setShowMobileDetail(false);
+                      setSelectedThreadSummary(null);
+                      setThreadDetail(null);
+                      setDetailError(null);
+                    }}
                   >
                     <ArrowLeft aria-hidden="true" />
                     <span>Back to inbox</span>

@@ -317,10 +317,12 @@ async function extractGmailBodies(
       }
     }
   }
-
   if (message.payload) {
     await walk(message.payload, 0);
   }
+
+  let text: string | undefined = textParts.length > 0 ? textParts.join('\n\n') : undefined;
+  let html: string | undefined = htmlParts.length > 0 ? htmlParts.join('\n') : undefined;
 
   if (text) {
     const res = truncateUtf8Bytes(text, MAX_BODY_SIZE_BYTES);
@@ -350,7 +352,8 @@ function mapGmailThreadSummary(
 ): MailboxThread | undefined {
   const threadId = (typeof threadJson?.id === 'string' && threadJson.id.trim()) || fallbackId;
   const messages = (threadJson?.messages ?? []).map((m) => mapGmailMessage(m)).filter(isDefined);
-  if (messages.length === 0) {
+  const firstMsg = messages[0];
+  if (!firstMsg) {
     return {
       provider: 'google',
       accountEmail,
@@ -370,9 +373,9 @@ function mapGmailThreadSummary(
   }
   const participants = deduplicateAddresses(allAddresses);
 
-  const subject = messages.find((m) => m.subject.trim())?.subject ?? messages[0].subject ?? '';
+  const subject = messages.find((m) => m.subject.trim())?.subject ?? firstMsg.subject ?? '';
 
-  let latestAt = messages[0].occurredAt;
+  let latestAt = firstMsg.occurredAt;
   for (const msg of messages) {
     if (Date.parse(msg.occurredAt) > Date.parse(latestAt)) {
       latestAt = msg.occurredAt;
@@ -391,6 +394,7 @@ function mapGmailThreadSummary(
     sourceUrl: `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/#all/${encodeURIComponent(threadId)}`,
   };
 }
+
 
 function mapGmailMessageBody(
   message: GmailMessageJson,

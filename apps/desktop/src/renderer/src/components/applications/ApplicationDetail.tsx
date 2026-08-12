@@ -97,7 +97,7 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Stage updated', detail: updated.stageName });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Transition failed', detail: err instanceof Error ? err.message : undefined });
+      notify({ tone: 'error', title: 'Transition failed', ...(err instanceof Error ? { detail: err.message } : {}) });
     } finally {
       setTransitioning(false);
     }
@@ -118,7 +118,7 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Note added' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to add note', detail: err instanceof Error ? err.message : undefined });
+      notify({ tone: 'error', title: 'Failed to add note', ...(err instanceof Error ? { detail: err.message } : {}) });
     } finally {
       setSavingNote(false);
     }
@@ -144,7 +144,7 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Task created' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to create task', detail: err instanceof Error ? err.message : undefined });
+      notify({ tone: 'error', title: 'Failed to create task', ...(err instanceof Error ? { detail: err.message } : {}) });
     } finally {
       setSavingTask(false);
     }
@@ -196,9 +196,9 @@ export function ApplicationDetail({
   if (loading) {
     return (
       <div className="application-detail-card">
-        <Skeleton style={{ height: '2rem', width: '60%' }} />
-        <Skeleton style={{ height: '1.5rem', width: '40%' }} />
-        <Skeleton style={{ height: '10rem', width: '100%' }} />
+        <div style={{ height: '2rem', width: '60%' }}><Skeleton /></div>
+        <div style={{ height: '1.5rem', width: '40%' }}><Skeleton /></div>
+        <div style={{ height: '10rem', width: '100%' }}><Skeleton /></div>
       </div>
     );
   }
@@ -227,22 +227,23 @@ export function ApplicationDetail({
     return t.status === taskFilter;
   });
 
-  // Filter drafts relevant to this application or contact (cleanly typed)
-  const appContactIds = new Set(app.contacts.map((c) => c.id));
-  const relevantDrafts = (data?.drafts ?? []).filter((d: DraftMessage) => {
-    const raw = d as unknown as Record<string, unknown>;
-    if (raw.applicationId === app.id) return true;
-    if (d.personId && appContactIds.has(d.personId)) return true;
-    if (typeof raw.contactId === 'string' && appContactIds.has(raw.contactId)) return true;
-    return false;
-  });
+  const appContactIds = new Set(app.contacts.map((contact) => contact.id));
+  const relevantDrafts = (data?.drafts ?? []).filter(
+    (draft: DraftMessage) =>
+      draft.applicationId === app.id || appContactIds.has(draft.contactId),
+  );
 
   return (
     <div className="application-detail-card">
       {/* Header & Back Button */}
       <div className="application-detail-header">
         {onBack ? (
-          <button type="button" className="back-to-applications-btn" onClick={onBack}>
+          <button
+            type="button"
+            className="back-to-applications-btn"
+            aria-label="Back to applications"
+            onClick={onBack}
+          >
             &larr; Back to applications
           </button>
         ) : null}
@@ -649,7 +650,10 @@ export function ApplicationDetail({
         applicationRole={app.role}
         companyName={app.companyName}
         onClose={() => setActiveDraftReview(null)}
-        onUpdated={() => fetchDetail()}
+        onUpdated={(updated) => {
+          setActiveDraftReview(updated);
+          void fetchDetail();
+        }}
       />
     </div>
   );

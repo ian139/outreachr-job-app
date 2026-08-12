@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ApplicationSummary, ApplicationTask } from '../../../../shared/contracts';
+import type { ApplicationSummary, ApplicationTask, CommandMap } from '../../../../shared/contracts';
 import { Badge, Button, EmptyState, formatDate, SearchField, Skeleton } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
@@ -44,14 +44,15 @@ export function ApplicationsList({
     setError(null);
 
     try {
-      const res = await command('application.list', {
-        query: query.trim() || undefined,
-        stageIds: stageFilter ? [stageFilter] : undefined,
-        companyId: companyFilter || undefined,
-        taskStatus: taskStatusFilter !== 'all' ? taskStatusFilter : undefined,
-        limit: 20,
-        cursor: reset ? undefined : (nextCursor ?? undefined),
-      });
+      const payload: CommandMap['application.list'] = { limit: 20 };
+      const q = query.trim();
+      if (q) payload.query = q;
+      if (stageFilter) payload.stageIds = [stageFilter];
+      if (companyFilter) payload.companyId = companyFilter;
+      if (taskStatusFilter !== 'all') payload.taskStatus = taskStatusFilter;
+      if (!reset && nextCursor) payload.cursor = nextCursor;
+
+      const res = await command('application.list', payload);
 
       if (reset) {
         setApplications(res.applications);
@@ -86,7 +87,7 @@ export function ApplicationsList({
             label="Search applications"
             placeholder="Filter by company or role title..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={setQuery}
           />
         </div>
 
@@ -95,7 +96,7 @@ export function ApplicationsList({
             className="filter-select"
             aria-label="Filter by stage"
             value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setStageFilter(e.target.value)}
           >
             <option value="">All stages</option>
             {stages.map((s) => (
@@ -109,7 +110,7 @@ export function ApplicationsList({
             className="filter-select"
             aria-label="Filter by company"
             value={companyFilter}
-            onChange={(e) => setCompanyFilter(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCompanyFilter(e.target.value)}
           >
             <option value="">All companies</option>
             {companies.map((c) => (
@@ -145,9 +146,9 @@ export function ApplicationsList({
       {/* Loading state */}
       {loading ? (
         <div className="applications-table-wrapper" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <Skeleton style={{ height: '3rem', width: '100%' }} />
-          <Skeleton style={{ height: '3rem', width: '100%' }} />
-          <Skeleton style={{ height: '3rem', width: '100%' }} />
+          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
+          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
+          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
         </div>
       ) : applications.length === 0 ? (
         <EmptyState

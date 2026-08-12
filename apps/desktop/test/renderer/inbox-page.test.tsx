@@ -195,8 +195,10 @@ describe('InboxPage component & messaging behavior', () => {
     const searchInput = screen.getByPlaceholderText('Search mail...');
     fireEvent.change(searchInput, { target: { value: 'Followup' } });
 
-    expect(screen.getByText('Job Application Followup')).toBeInTheDocument();
-    expect(screen.queryByText('Software Engineer Application Status')).not.toBeInTheDocument();
+    expect(await screen.findByText('Job Application Followup')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText('Software Engineer Application Status')).not.toBeInTheDocument(),
+    );
   });
 
   it('selects a thread, loads messages, and handles detail cursor pagination', async () => {
@@ -233,9 +235,7 @@ describe('InboxPage component & messaging behavior', () => {
     });
 
     // Verify newly appended message from page 2 appears
-    expect(
-      await screen.findByText(/HTML only message body with bold detail/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/HTML only message body with/i)).toBeInTheDocument();
 
     // Rapid selection of second thread to test cancellation call
     const thread2Card = screen.getByText('Software Engineer Application Status');

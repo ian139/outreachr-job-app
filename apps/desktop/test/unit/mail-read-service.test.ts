@@ -85,8 +85,8 @@ describe('MailReadService & Bridge IPC', () => {
 
     service = new MailReadService({ connectors: mockConnectorService });
 
-    testDir = await temporaryDirectory();
-    vaultService = initializedVault(testDir);
+    testDir = await temporaryDirectory('mail-read');
+    vaultService = await initializedVault(testDir);
   });
 
   afterEach(async () => {

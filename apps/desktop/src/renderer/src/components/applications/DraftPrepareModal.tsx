@@ -30,7 +30,7 @@ export function DraftPrepareModal({
 
   // Connected emails from connectors
   const connectedAccounts = (data?.connectors ?? [])
-    .filter((c) => c.status === 'connected' && Boolean(c.accountEmail))
+    .filter((connector) => connector.state === 'connected' && Boolean(connector.accountEmail))
     .map((c) => ({ provider: c.provider, email: c.accountEmail! }));
 
   const defaultEmail = connectedAccounts[0]?.email ?? data?.workspaceProfile?.primaryEmail ?? '';

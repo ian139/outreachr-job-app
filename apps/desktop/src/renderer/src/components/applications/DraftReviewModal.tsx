@@ -25,10 +25,8 @@ export function DraftReviewModal({
 
   if (!draft) return null;
 
-  // Resolve application context from props or workspace data
-  const rawDraft = draft as Record<string, unknown>;
   const appCtx = (data?.applications ?? []).find(
-    (a) => a.id === (rawDraft.applicationId as string | undefined),
+    (application) => application.id === draft.applicationId,
   );
   const roleContext = applicationRole || appCtx?.role || 'Job Application';
   const companyContext = companyName || appCtx?.companyName || 'Target Company';
@@ -148,11 +146,9 @@ export function DraftReviewModal({
           <div style={{ fontWeight: 700, color: '#0f172a', marginTop: '0.125rem' }}>
             {roleContext} at {companyContext}
           </div>
-          {(rawDraft.applicationId as string | undefined) ? (
-            <div style={{ fontSize: '0.75rem', color: '#15803d', marginTop: '0.125rem' }}>
-              Application ID: {rawDraft.applicationId as string}
-            </div>
-          ) : null}
+          <div style={{ fontSize: '0.75rem', color: '#15803d', marginTop: '0.125rem' }}>
+            Application ID: {draft.applicationId}
+          </div>
         </div>
 
         {blockReasons.length > 0 ? (

@@ -13,6 +13,7 @@ import {
   validateMailboxListInput,
   validateMailboxThreadListInput,
 } from './mailbox.js';
+import { executeGuardedSend } from './send.js';
 import type {
   CalendarAttendee,
   CalendarConnector,
@@ -94,19 +95,6 @@ interface GraphEventJson {
   webLink?: string;
 }
 
-interface GraphMessageJson {
-  id?: string;
-  conversationId?: string;
-  internetMessageId?: string;
-  subject?: string;
-  from?: GraphRecipientJson;
-  toRecipients?: GraphRecipientJson[];
-  ccRecipients?: GraphRecipientJson[];
-  receivedDateTime?: string;
-  sentDateTime?: string;
-  isDraft?: boolean;
-  internetMessageHeaders?: Array<{ name?: string; value?: string }>;
-}
 
 const defaultNow = (): Date => new Date();
 
@@ -278,16 +266,21 @@ function mapGraphMessage(
   const occurredAt =
     safeIsoTimestamp(message?.sentDateTime) ?? safeIsoTimestamp(message?.receivedDateTime);
   if (!id || !from || !occurredAt) return undefined;
+  const headers = Array.isArray(message.internetMessageHeaders)
+    ? message.internetMessageHeaders
+    : [];
+  const internetMessageId =
+    typeof message.internetMessageId === 'string'
+      ? message.internetMessageId
+      : headers.find(
+          (header) => header.name?.toLocaleLowerCase('en-US') === 'message-id',
+        )?.value;
   return {
     provider: 'microsoft',
     id,
     threadId: typeof message.conversationId === 'string' ? message.conversationId : undefined,
-    internetMessageId:
-      typeof message.internetMessageId === 'string' ? message.internetMessageId : undefined,
-    operationKey: (Array.isArray(message.internetMessageHeaders)
-      ? message.internetMessageHeaders
-      : []
-    ).find(
+    internetMessageId,
+    operationKey: headers.find(
       (header) =>
         typeof header?.name === 'string' &&
         header.name.toLocaleLowerCase('en-US') ===
@@ -318,7 +311,8 @@ function mapGraphThreadSummary(
   if (msgs.length === 0) return undefined;
 
   const mappedMsgs = msgs.map((m) => mapGraphMessage(m)).filter(isDefined);
-  if (mappedMsgs.length === 0) return undefined;
+  const firstMsg = mappedMsgs[0];
+  if (!firstMsg) return undefined;
 
   const allAddresses: EmailAddress[] = [];
   for (const m of mappedMsgs) {
@@ -326,10 +320,10 @@ function mapGraphThreadSummary(
   }
   const participants = deduplicateAddresses(allAddresses);
 
-  const subject = mappedMsgs.find((m) => m.subject.trim())?.subject ?? mappedMsgs[0].subject ?? '';
+  const subject = mappedMsgs.find((m) => m.subject.trim())?.subject ?? firstMsg.subject ?? '';
   const snippet = msgs.find((m) => typeof m.bodyPreview === 'string' && m.bodyPreview.trim())?.bodyPreview ?? '';
 
-  let latestAt = mappedMsgs[0].occurredAt;
+  let latestAt = firstMsg.occurredAt;
   for (const m of mappedMsgs) {
     if (Date.parse(m.occurredAt) > Date.parse(latestAt)) {
       latestAt = m.occurredAt;

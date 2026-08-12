@@ -39,7 +39,11 @@ export function ApplicationsPipeline({
       await command('application.transition', { id: appId, toStageId });
       notify({ tone: 'success', title: 'Application stage updated' });
     } catch (err) {
-      notify({ tone: 'error', title: 'Stage transition failed', detail: err instanceof Error ? err.message : undefined });
+      notify({
+        tone: 'error',
+        title: 'Stage transition failed',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     }
   };
 

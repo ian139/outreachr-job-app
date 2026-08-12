@@ -46,17 +46,17 @@ const cancellableSleep = (
   if (!signal) {
     return (customSleep ?? defaultSleep)(milliseconds);
   }
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
-  const onAbort = () => {
-    clearTimeout(timer);
-    reject(signal.reason ?? new Error('Aborted'));
-  };
-  const timer = setTimeout(() => {
-    signal.removeEventListener('abort', onAbort);
-    resolve();
-  }, milliseconds);
-  signal.addEventListener('abort', onAbort, { once: true });
-  return promise;
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error('Aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 };
 
 function mergedRetryPolicy(input?: Partial<RetryPolicy>): RetryPolicy {
@@ -156,7 +156,11 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
         throw cause;
       }
       if (options.retryNetworkErrors && attempt < policy.maxAttempts) {
-        await cancellableSleep(retryDelay(attempt, undefined, policy), options.init?.signal, sleep);
+        await cancellableSleep(
+          retryDelay(attempt, undefined, policy),
+          options.init?.signal ?? undefined,
+          sleep,
+        );
         continue;
       }
       throw new ConnectorError({
@@ -187,7 +191,11 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
     const safeOperationRetry = Boolean(options.retryServerErrors && response.status >= 500);
     if ((explicitRetry || safeOperationRetry) && attempt < policy.maxAttempts) {
       await response.arrayBuffer().catch(() => undefined);
-      await cancellableSleep(retryDelay(attempt, response, policy), options.init?.signal, sleep);
+      await cancellableSleep(
+        retryDelay(attempt, response, policy),
+        options.init?.signal ?? undefined,
+        sleep,
+      );
       continue;
     }
 

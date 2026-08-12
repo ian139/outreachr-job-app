@@ -105,7 +105,7 @@ export function ApplicationsPage({
             <ApplicationDetail
               applicationId={selectedId}
               onBack={() => setSelectedId(null)}
-              onNavigateThread={onNavigateThread}
+              {...(onNavigateThread ? { onNavigateThread } : {})}
             />
           </aside>
         ) : null}
