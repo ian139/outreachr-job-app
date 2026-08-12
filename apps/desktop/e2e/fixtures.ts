@@ -119,6 +119,38 @@ export async function attachScreenshot(
     contentType: 'image/png',
   });
 }
+export async function setupJobWorkspace(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await window.outreachr.command('workspace.setup', {
+      displayName: 'Ada Candidate',
+      primaryEmail: 'ada@local.test',
+      stages: [
+        { name: 'Applied', terminal: false },
+        { name: 'Interviewing', terminal: false },
+        { name: 'Offer', terminal: true },
+      ],
+    });
+  });
+  await page.reload();
+  await page.waitForLoadState('domcontentloaded');
+}
+
+export async function connectGoogleRelationshipSync(page: Page): Promise<void> {
+  await navigate(page, 'Settings');
+  await page.getByRole('button', { name: 'Mail & calendar', exact: true }).click();
+  const googleSection = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Google Workspace', exact: true }),
+  });
+  await expect(googleSection).toBeVisible();
+  await googleSection
+    .getByRole('textbox', { name: 'Application (client) ID' })
+    .fill('e2e-founder-owned-desktop-client');
+  await googleSection.getByRole('checkbox', { name: /Enable relationship sync/u }).check();
+  await googleSection.getByRole('button', { name: 'Save and connect in browser' }).click();
+
+  await expect(page.getByText('Google connected', { exact: true })).toBeVisible();
+  await expect(googleSection.getByText('ada@local.test', { exact: true })).toBeVisible();
+}
 
 export async function completeOnboarding(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Who is running this round?' })).toBeVisible();
@@ -171,4 +203,114 @@ export async function navigate(page: Page, label: string): Promise<void> {
       exact: true,
     })
     .click();
+}
+export interface LayoutMeasurement {
+  viewportWidth: number;
+  viewportHeight: number;
+  documentScrollWidth: number;
+  documentClientWidth: number;
+  overflowX: boolean;
+}
+
+export async function setViewportAndMeasure(
+  page: Page,
+  width: number,
+  height: number,
+): Promise<LayoutMeasurement> {
+  await page.setViewportSize({ width, height });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  const measurement = await page.evaluate(() => ({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    documentScrollWidth: document.documentElement.scrollWidth,
+    documentClientWidth: document.documentElement.clientWidth,
+    overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  }));
+  return measurement;
+}
+
+export async function assertNoHorizontalScroll(page: Page): Promise<void> {
+  const measurement = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(
+    measurement.scrollWidth,
+    `Document scrollWidth (${measurement.scrollWidth}px) exceeds clientWidth (${measurement.clientWidth}px)`,
+  ).toBeLessThanOrEqual(measurement.clientWidth);
+}
+
+export interface ControlSizeMeasurement {
+  role?: string;
+  name?: string;
+  width: number;
+  height: number;
+  meetsTouchTarget: boolean;
+}
+
+export async function measureControlSizes(
+  page: Page,
+  controls: Array<{ role: string; name: string }>,
+): Promise<ControlSizeMeasurement[]> {
+  const results: ControlSizeMeasurement[] = [];
+  for (const control of controls) {
+    const locator = page.getByRole(control.role as Parameters<Page['getByRole']>[0], {
+      name: control.name,
+    });
+    const box = await locator.first().boundingBox();
+    const width = box?.width ?? 0;
+    const height = box?.height ?? 0;
+    results.push({
+      role: control.role,
+      name: control.name,
+      width,
+      height,
+      meetsTouchTarget: width >= 44 && height >= 44,
+    });
+  }
+  return results;
+}
+export async function measureAllVisibleControls(
+  page: Page,
+): Promise<ControlSizeMeasurement[]> {
+  const elements = await page.locator('button, a[href], input, select, textarea').all();
+  const results: ControlSizeMeasurement[] = [];
+  for (const element of elements) {
+    if (await element.isVisible()) {
+      const box = await element.boundingBox();
+      if (box && box.width > 0 && box.height > 0) {
+        const text = (await element.textContent())?.trim() || (await element.getAttribute('aria-label')) || '';
+        results.push({
+          name: text.slice(0, 40),
+          width: box.width,
+          height: box.height,
+          meetsTouchTarget: box.width >= 44 && box.height >= 44,
+        });
+      }
+    }
+  }
+  return results;
+}
+
+export async function captureResponsiveScreenshot(
+  page: Page,
+  testInfo: TestInfo,
+  viewport: { width: number; height: number },
+  name: string,
+): Promise<LayoutMeasurement> {
+  const layout = await setViewportAndMeasure(page, viewport.width, viewport.height);
+  await assertNoHorizontalScroll(page);
+  await attachScreenshot(page, testInfo, `${name}-${viewport.width}x${viewport.height}`);
+  return layout;
+}
+
+export function assertZeroLiveSends(googleProviderMockState: GoogleProviderMockState): void {
+  expect(
+    googleProviderMockState.sentRawMessages.length,
+    'Mock state recorded live send calls without founder approval',
+  ).toBe(0);
+  expect(
+    googleProviderMockState.gmailSendCalls,
+    'Gmail send API was called without explicit approval',
+  ).toBe(0);
 }

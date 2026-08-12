@@ -71,6 +71,208 @@ function gmailMessage(id: string): Record<string, unknown> {
   return values[id] ?? {};
 }
 
+function gmailThread(id: string): Record<string, unknown> {
+  const threads: Record<string, Record<string, unknown>> = {
+    'thread-plain-text': {
+      id: 'thread-plain-text',
+      historyId: '1001',
+      messages: [
+        {
+          id: 'msg-plain-text',
+          threadId: 'thread-plain-text',
+          internalDate: '1735689600000',
+          snippet: 'Plain text body content for senior software engineer interview.',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: 'Jane Recruiter <jane.recruiter@techcorp.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Senior Software Engineer Interview' },
+              { name: 'Date', value: 'Wed, 01 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<plain-text@techcorp.test>' },
+            ],
+            body: {
+              data: Buffer.from('Plain text body content for senior software engineer interview.').toString('base64url'),
+            },
+          },
+        },
+      ],
+    },
+    'thread-sanitized-html': {
+      id: 'thread-sanitized-html',
+      historyId: '1002',
+      messages: [
+        {
+          id: 'msg-sanitized-html',
+          threadId: 'thread-sanitized-html',
+          internalDate: '1735776000000',
+          snippet: 'Welcome to Acme Corp! View Careers details.',
+          payload: {
+            mimeType: 'text/html',
+            headers: [
+              { name: 'From', value: 'Hiring Manager <hiring@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Job Offer Details' },
+              { name: 'Date', value: 'Thu, 02 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<offer@acme.test>' },
+            ],
+            body: {
+              data: Buffer.from('<p>Welcome to Acme Corp!</p><script>alert("xss")</script><style>body { color: red; }</style><a href="https://acme.test/careers">View Careers</a>').toString('base64url'),
+            },
+          },
+        },
+      ],
+    },
+    'thread-quoted-reply': {
+      id: 'thread-quoted-reply',
+      historyId: '1003',
+      messages: [
+        {
+          id: 'msg-quoted-reply',
+          threadId: 'thread-quoted-reply',
+          internalDate: '1735862400000',
+          snippet: 'Thank you for sending your resume...',
+          payload: {
+            mimeType: 'text/html',
+            headers: [
+              { name: 'From', value: 'Recruiter <recruiter@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Re: Application Status Update' },
+              { name: 'Date', value: 'Fri, 03 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<quoted@acme.test>' },
+            ],
+            body: {
+              data: Buffer.from('<div>Thank you for sending your resume. We would love to set up an interview.</div><blockquote type="cite"><div>On Mon, Jan 5, 2026, Ada Candidate wrote:</div><div>Submitting application for Senior Engineer role.</div></blockquote>').toString('base64url'),
+            },
+          },
+        },
+      ],
+    },
+    'thread-long-url': {
+      id: 'thread-long-url',
+      historyId: '1004',
+      messages: [
+        {
+          id: 'msg-long-url',
+          threadId: 'thread-long-url',
+          internalDate: '1735948800000',
+          snippet: 'Please complete your application portal access...',
+          payload: {
+            mimeType: 'text/html',
+            headers: [
+              { name: 'From', value: 'Portal Support <support@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Application Portal Access' },
+              { name: 'Date', value: 'Sat, 04 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<portal@acme.test>' },
+            ],
+            body: {
+              data: Buffer.from('<p>Please access your portal at: <a href="https://example.test/portal/' + 'a'.repeat(600) + '">https://example.test/portal/' + 'a'.repeat(600) + '</a></p>').toString('base64url'),
+            },
+          },
+        },
+      ],
+    },
+    'thread-pre-table': {
+      id: 'thread-pre-table',
+      historyId: '1005',
+      messages: [
+        {
+          id: 'msg-pre-table',
+          threadId: 'thread-pre-table',
+          internalDate: '1736035200000',
+          snippet: 'Technical Interview Code Sample and Compensation Table',
+          payload: {
+            mimeType: 'text/html',
+            headers: [
+              { name: 'From', value: 'Lead Tech <tech@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Technical Interview Code Sample and Compensation Table' },
+              { name: 'Date', value: 'Sun, 05 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<tech-sample@acme.test>' },
+            ],
+            body: {
+              data: Buffer.from('<div>Code structure:</div><pre>function test() {\n  return true;\n}</pre><table><thead><tr><th>Role</th><th>Salary</th></tr></thead><tbody><tr><td>Staff Engineer</td><td>$220,000</td></tr></tbody></table>').toString('base64url'),
+            },
+          },
+        },
+      ],
+    },
+    'thread-empty': {
+      id: 'thread-empty',
+      historyId: '1006',
+      messages: [
+        {
+          id: 'msg-empty',
+          threadId: 'thread-empty',
+          internalDate: '1736121600000',
+          snippet: '',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: 'HR Admin <hr@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Blank Message Test' },
+              { name: 'Date', value: 'Mon, 06 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<blank@acme.test>' },
+            ],
+            body: { data: '' },
+          },
+        },
+      ],
+    },
+    'thread-truncated': {
+      id: 'thread-truncated',
+      historyId: '1007',
+      messages: [
+        {
+          id: 'msg-truncated',
+          threadId: 'thread-truncated',
+          internalDate: '1736208000000',
+          snippet: 'Diagnostic Export Attachment',
+          providerTruncated: true,
+          truncationReason: 'size_limit',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: 'DevOps <devops@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Large Diagnostic Export Attachment' },
+              { name: 'Date', value: 'Tue, 07 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<truncated@acme.test>' },
+            ],
+            body: { data: Buffer.from('Message body truncated by provider').toString('base64url') },
+          },
+        },
+      ],
+    },
+    'thread-stale': {
+      id: 'thread-stale',
+      historyId: '1008',
+      messages: [
+        {
+          id: 'msg-stale',
+          threadId: 'thread-stale',
+          internalDate: '1736294400000',
+          snippet: 'Slow Responding Thread',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: 'Slow Server <slow@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Slow Responding Thread' },
+              { name: 'Date', value: 'Wed, 08 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<slow@acme.test>' },
+            ],
+            body: { data: Buffer.from('Delayed response body content.').toString('base64url') },
+          },
+        },
+      ],
+    },
+  };
+  return threads[id] ?? {};
+}
+
 function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestHandler[] {
   const firstEventStart = new Date(Date.now() + 2 * 86_400_000);
   firstEventStart.setUTCHours(17, 0, 0, 0);
@@ -137,6 +339,45 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
         messages: [{ id: 'outbound-page-one' }, { id: 'ignored-inbound' }],
         nextPageToken: 'gmail-page-two',
       });
+    }),
+    http.get(`${baseUrl}/gmail/v1/users/me/threads`, ({ request }) => {
+      const denied = requireAccessToken(request);
+      if (denied) return denied;
+      const url = new URL(request.url);
+      const pageToken = url.searchParams.get('pageToken');
+      if (pageToken === 'thread-page-two') {
+        return HttpResponse.json({
+          threads: [{ id: 'outbound-page-two', snippet: 'Historical page two' }],
+        });
+      }
+      return HttpResponse.json({
+        threads: [
+          { id: 'thread-plain-text', snippet: 'Plain text body content for senior software engineer interview.' },
+          { id: 'thread-sanitized-html', snippet: 'Welcome to Acme Corp! View Careers details.' },
+          { id: 'thread-quoted-reply', snippet: 'Thank you for sending your resume...' },
+          { id: 'thread-long-url', snippet: 'Please complete your application portal access...' },
+          { id: 'thread-pre-table', snippet: 'Technical Interview Code Sample and Compensation Table' },
+          { id: 'thread-empty', snippet: '' },
+          { id: 'thread-error', snippet: 'Provider Error Failure' },
+          { id: 'thread-truncated', snippet: 'Diagnostic Export Attachment' },
+          { id: 'thread-stale', snippet: 'Slow Responding Thread' },
+        ],
+        nextPageToken: 'thread-page-two',
+      });
+    }),
+    http.get(`${baseUrl}/gmail/v1/users/me/threads/:threadId`, async ({ params, request }) => {
+      const denied = requireAccessToken(request);
+      if (denied) return denied;
+      const threadId = String(params.threadId);
+      if (threadId === 'thread-error') {
+        return HttpResponse.json({ error: 'Internal provider failure' }, { status: 500 });
+      }
+      if (threadId === 'thread-stale') {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      const data = gmailThread(threadId);
+      if (!data.id) return HttpResponse.json({ error: 'Thread not found' }, { status: 404 });
+      return HttpResponse.json(data);
     }),
     http.get(`${baseUrl}/gmail/v1/users/me/messages/:messageId`, ({ params, request }) => {
       const denied = requireAccessToken(request);
