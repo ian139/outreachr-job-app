@@ -169,6 +169,56 @@ export interface MailboxMessage {
    */
   direction?: 'inbound' | 'outbound';
 }
+export interface MailboxThread {
+  provider: ConnectorProvider;
+  accountEmail: string;
+  threadId: string;
+  subject: string;
+  snippet?: string;
+  participants: EmailAddress[];
+  latestAt: string;
+  messageCount: number;
+  sourceUrl?: string;
+}
+
+export interface MailboxMessageBody extends MailboxMessage {
+  accountEmail: string;
+  threadId: string;
+  bodyText?: string;
+  bodyHtml?: string;
+  providerTruncated: boolean;
+  truncationReason?: string;
+  sourceUrl?: string;
+  fetchedAt: string;
+}
+
+export interface ListMailboxThreadsInput {
+  accountEmail: string;
+  query?: string;
+  pageSize?: number;
+  pageToken?: string;
+  signal?: AbortSignal;
+}
+
+export interface MailboxThreadPage {
+  threads: MailboxThread[];
+  nextPageToken?: string;
+}
+
+export interface GetMailboxThreadInput {
+  accountEmail: string;
+  threadId: string;
+  pageSize?: number;
+  pageToken?: string;
+  signal?: AbortSignal;
+}
+
+export interface MailboxThreadMessagesPage {
+  thread: MailboxThread;
+  messages: MailboxMessageBody[];
+  nextPageToken?: string;
+}
+
 
 export interface ListMailboxMessagesInput {
   /** Only messages at or after this ISO timestamp are requested. Omit for all history. */
@@ -192,6 +242,8 @@ export interface MailboxMessagePage {
 export interface RelationshipMailConnector {
   readonly provider: ConnectorProvider;
   listMailboxMessages(input: ListMailboxMessagesInput): Promise<MailboxMessagePage>;
+  listMailboxThreads(input: ListMailboxThreadsInput): Promise<MailboxThreadPage>;
+  getMailboxThread(input: GetMailboxThreadInput): Promise<MailboxThreadMessagesPage>;
 }
 
 export interface CalendarDateTime {

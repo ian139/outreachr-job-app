@@ -39,6 +39,7 @@
     "@outreachr/connectors": "workspace:*",
     "@outreachr/core": "workspace:*",
     "@outreachr/mcp": "workspace:*",
+    "dompurify": "^3.4.13",
     "lucide-react": "1.28.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

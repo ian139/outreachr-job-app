@@ -1,6 +1,9 @@
 export const IPC_CHANNELS = {
   bootstrap: 'outreachr:bootstrap',
   command: 'outreachr:command',
+  listMailThreads: 'outreachr:list-mail-threads',
+  getMailThread: 'outreachr:get-mail-thread',
+  cancelMailRequest: 'outreachr:cancel-mail-request',
   selectFile: 'outreachr:select-file',
   selectDirectory: 'outreachr:select-directory',
   openExternal: 'outreachr:open-external',
@@ -41,6 +44,165 @@ export type PipelineStage =
 export type Confidence = 'verified' | 'supported' | 'inferred' | 'unknown' | 'stale';
 export type ConnectorProvider = 'google' | 'microsoft';
 export type AgentProvider = 'codex' | 'claude';
+export interface WorkspaceProfile {
+  id: string;
+  displayName: string;
+  primaryEmail: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  website: string | null;
+  location: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Contact {
+  id: string;
+  companyId: string | null;
+  name: string;
+  title: string | null;
+  primaryEmail: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationStage {
+  id: string;
+  name: string;
+  position: number;
+  terminal: boolean;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationStageHistoryItem {
+  id: string;
+  applicationId: string;
+  fromStageId: string | null;
+  toStageId: string;
+  changedAt: string;
+  note: string | null;
+}
+
+export interface ApplicationThreadLink {
+  applicationId: string;
+  provider: ConnectorProvider;
+  accountEmail: string;
+  providerThreadId: string;
+  subjectSnapshot: string | null;
+  linkedAt: string;
+}
+
+export interface ApplicationNote {
+  id: string;
+  applicationId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationTask {
+  id: string;
+  applicationId: string;
+  title: string;
+  notes: string | null;
+  dueAt: string | null;
+  status: 'open' | 'done' | 'dismissed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationSummary {
+  id: string;
+  companyId: string;
+  companyName: string;
+  role: string;
+  stageId: string;
+  stageName: string;
+  sourceUrl: string | null;
+  appliedAt: string | null;
+  nextEventAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationDetail extends ApplicationSummary {
+  company: Company;
+  contacts: Array<Contact & { relationship: string; primary: boolean }>;
+  threads: ApplicationThreadLink[];
+  notes: ApplicationNote[];
+  tasks: ApplicationTask[];
+  stageHistory: ApplicationStageHistoryItem[];
+}
+
+export interface MailThreadSummary {
+  provider: ConnectorProvider;
+  accountEmail: string;
+  threadId: string;
+  subject: string;
+  snippet: string | null;
+  participants: string[];
+  latestAt: string;
+  messageCount: number;
+  sourceUrl: string | null;
+}
+
+export interface MailMessageBody {
+  provider: ConnectorProvider;
+  accountEmail: string;
+  threadId: string;
+  messageId: string;
+  internetMessageId: string | null;
+  subject: string;
+  from: { email: string; name?: string };
+  to: Array<{ email: string; name?: string }>;
+  cc: Array<{ email: string; name?: string }>;
+  occurredAt: string;
+  labels: string[];
+  direction: 'inbound' | 'outbound' | null;
+  bodyText: string | null;
+  bodyHtml: string | null;
+  providerTruncated: boolean;
+  truncationReason: string | null;
+  sourceUrl: string | null;
+  fetchedAt: string;
+}
+
+export interface MailThreadPage {
+  thread: MailThreadSummary;
+  messages: MailMessageBody[];
+  nextCursor: string | null;
+}
+
+export interface ListMailThreadsRequest {
+  requestId: string;
+  provider: ConnectorProvider;
+  accountEmail: string;
+  query?: string;
+  limit: number;
+  cursor?: string;
+}
+
+export interface GetMailThreadRequest {
+  requestId: string;
+  provider: ConnectorProvider;
+  accountEmail: string;
+  threadId: string;
+  limit: number;
+  cursor?: string;
+}
+
+export interface MailThreadListPage {
+  threads: MailThreadSummary[];
+  nextCursor: string | null;
+}
+
 
 export interface MoneyRange {
   currency: 'USD';
@@ -380,6 +542,11 @@ export interface AppBootstrap {
   suppressions: SuppressionItem[];
   communicationPolicy: CommunicationPolicy;
   auditIntegrity: AuditIntegrityStatus;
+  workspaceProfile: WorkspaceProfile | null;
+  companies: Company[];
+  contacts: Contact[];
+  applicationStages: ApplicationStage[];
+  applications: ApplicationSummary[];
   counts: {
     firms: number;
     people: number;
@@ -406,6 +573,74 @@ export interface FounderSetupInput {
 }
 
 export interface CommandMap {
+  'workspace.setup': Pick<WorkspaceProfile, 'displayName' | 'primaryEmail'> & {
+    stages: Array<Pick<ApplicationStage, 'name' | 'terminal'>>;
+  };
+  'company.create': Pick<Company, 'name' | 'website' | 'location'>;
+  'company.update': Pick<Company, 'id' | 'name' | 'website' | 'location'>;
+  'contact.create': Pick<Contact, 'companyId' | 'name' | 'title' | 'primaryEmail'>;
+  'contact.update': Pick<Contact, 'id' | 'companyId' | 'name' | 'title' | 'primaryEmail'>;
+  'applicationStage.create': Pick<ApplicationStage, 'name' | 'position' | 'terminal'>;
+  'applicationStage.update': Pick<ApplicationStage, 'id' | 'name' | 'position' | 'terminal' | 'archived'>;
+  'applicationStage.transition.set': {
+    fromStageId: string;
+    toStageId: string;
+    allowed: boolean;
+  };
+  'application.create': {
+    companyId: string;
+    role: string;
+    stageId: string;
+    sourceUrl?: string | null;
+    appliedAt?: string | null;
+    nextEventAt?: string | null;
+  };
+  'application.get': { id: string };
+  'application.list': {
+    query?: string;
+    stageIds?: string[];
+    companyId?: string;
+    taskStatus?: ApplicationTask['status'];
+    limit: number;
+    cursor?: string;
+  };
+  'application.update': {
+    id: string;
+    companyId?: string;
+    role?: string;
+    sourceUrl?: string | null;
+    appliedAt?: string | null;
+    nextEventAt?: string | null;
+  };
+  'application.transition': {
+    id: string;
+    toStageId: string;
+    note?: string | null;
+  };
+  'application.contact.link': {
+    applicationId: string;
+    contactId: string;
+    relationship: string;
+    primary: boolean;
+  };
+  'application.contact.unlink': { applicationId: string; contactId: string };
+  'application.thread.link': Omit<ApplicationThreadLink, 'linkedAt'>;
+  'application.thread.unlink': {
+    applicationId: string;
+    provider: ConnectorProvider;
+    accountEmail: string;
+    providerThreadId: string;
+  };
+  'application.note.create': Pick<ApplicationNote, 'applicationId' | 'body'>;
+  'application.note.update': Pick<ApplicationNote, 'id' | 'body'>;
+  'application.task.create': Omit<ApplicationTask, 'id' | 'createdAt' | 'updatedAt'>;
+  'application.task.update': {
+    id: string;
+    title?: string;
+    notes?: string | null;
+    dueAt?: string | null;
+    status?: ApplicationTask['status'];
+  };
   'onboarding.complete': FounderSetupInput;
   'investor.get': { id: string };
   'investor.create': {
@@ -523,6 +758,27 @@ export interface CommandMap {
 }
 
 export interface CommandResultMap {
+  'workspace.setup': AppBootstrap;
+  'company.create': Company;
+  'company.update': Company;
+  'contact.create': Contact;
+  'contact.update': Contact;
+  'applicationStage.create': ApplicationStage;
+  'applicationStage.update': ApplicationStage;
+  'applicationStage.transition.set': { allowed: boolean };
+  'application.create': ApplicationDetail;
+  'application.get': ApplicationDetail;
+  'application.list': { applications: ApplicationSummary[]; nextCursor: string | null };
+  'application.update': ApplicationDetail;
+  'application.transition': ApplicationDetail;
+  'application.contact.link': ApplicationDetail;
+  'application.contact.unlink': ApplicationDetail;
+  'application.thread.link': ApplicationDetail;
+  'application.thread.unlink': ApplicationDetail;
+  'application.note.create': ApplicationNote;
+  'application.note.update': ApplicationNote;
+  'application.task.create': ApplicationTask;
+  'application.task.update': ApplicationTask;
   'onboarding.complete': AppBootstrap;
   'investor.get': InvestorDetail;
   'investor.create': InvestorSummary;
@@ -584,6 +840,9 @@ export interface OutreachrBridge {
     command: K,
     payload: CommandMap[K],
   ) => Promise<CommandResultMap[K]>;
+  listMailThreads: (request: ListMailThreadsRequest) => Promise<MailThreadListPage>;
+  getMailThread: (request: GetMailThreadRequest) => Promise<MailThreadPage>;
+  cancelMailRequest: (requestId: string) => Promise<void>;
   selectFile: (filters?: Array<{ name: string; extensions: string[] }>) => Promise<string | null>;
   selectDirectory: () => Promise<string | null>;
   openExternal: (url: string) => Promise<void>;
