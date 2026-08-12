@@ -10,7 +10,13 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from 'electron';
-import { IPC_CHANNELS, type AgentEvent, type CommandMap } from '../shared/contracts';
+import {
+  IPC_CHANNELS,
+  type AgentEvent,
+  type CommandMap,
+  type GetMailThreadRequest,
+  type ListMailThreadsRequest,
+} from '../shared/contracts';
 import { DesktopAgentService } from './agent-service';
 import { CommandService } from './command-service';
 import { ConnectorService } from './connector-service';
@@ -24,11 +30,14 @@ import {
 } from './navigation-security';
 import { ElectronSecretStoreBackend, SecureStore } from './secure-store';
 import { VaultService } from './vault-service';
+import { MailReadService } from './mail-read-service';
+
 
 let mainWindow: BrowserWindow | null = null;
 let vaultService: VaultService | null = null;
 let agentService: DesktopAgentService | null = null;
 let mcpBridge: DesktopMcpBridge | null = null;
+let mailReadService: MailReadService | null = null;
 let ipcRegistered = false;
 let shutdownStarted = false;
 
@@ -111,9 +120,14 @@ async function createWindow(
   window.webContents.on('will-navigate', guardNavigation);
   window.webContents.on('will-redirect', guardNavigation);
   window.once('ready-to-show', () => window.show());
+  window.webContents.on('destroyed', () => {
+    mailReadService?.cancelAllRequests();
+  });
   window.on('closed', () => {
+    mailReadService?.cancelAllRequests();
     if (mainWindow === window) mainWindow = null;
   });
+
 
   if (!ipcRegistered) {
     ipcRegistered = true;
@@ -192,7 +206,32 @@ async function createWindow(
         if (error) throw new Error(error);
       },
     );
+    ipcMain.handle(
+      IPC_CHANNELS.listMailThreads,
+      (event, request: ListMailThreadsRequest) => {
+        assertTrustedIpcSender(event);
+        if (!mailReadService) throw new Error('Mail read service is not initialized');
+        return mailReadService.listMailThreads(request);
+      },
+    );
+    ipcMain.handle(
+      IPC_CHANNELS.getMailThread,
+      (event, request: GetMailThreadRequest) => {
+        assertTrustedIpcSender(event);
+        if (!mailReadService) throw new Error('Mail read service is not initialized');
+        return mailReadService.getMailThread(request);
+      },
+    );
+    ipcMain.handle(
+      IPC_CHANNELS.cancelMailRequest,
+      (event, requestId: string) => {
+        assertTrustedIpcSender(event);
+        if (!mailReadService) throw new Error('Mail read service is not initialized');
+        return mailReadService.cancelMailRequest(requestId);
+      },
+    );
   }
+
 
   if (launchHooks.developmentRendererUrl) await window.loadURL(launchHooks.developmentRendererUrl);
   else await window.loadFile(rendererEntry);
@@ -247,6 +286,7 @@ async function start(): Promise<void> {
         }
       : {}),
   });
+  mailReadService = new MailReadService({ connectors });
   const mcp = await DesktopMcpBridge.start({ vault, appVersion: app.getVersion() });
   mcpBridge = mcp;
   startupDiagnostic('local MCP bridge initialized');
@@ -320,6 +360,7 @@ app.on('before-quit', (event) => {
       return;
     }
     await Promise.allSettled([agentService?.dispose(), mcpBridge?.dispose()]);
+    mailReadService?.cancelAllRequests();
     app.quit();
   })();
 });

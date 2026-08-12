@@ -17,6 +17,7 @@ import {
   type EmailMessage,
   type OAuthTokenSet,
   type PreparedAuthorizationRequest,
+  type RelationshipMailConnector,
   type SendAttemptLedger,
   type SendContext,
   type SendReceipt,
@@ -580,6 +581,25 @@ export class ConnectorService {
     }
     return (await this.statuses()).find((status) => status.provider === provider)!;
   }
+  getMailConnector(
+    provider: ConnectorProvider,
+    accountEmail: string,
+  ): RelationshipMailConnector {
+    const config = this.#config(provider);
+    if (!config || config.status !== 'connected') {
+      throw new Error(`${provider} is not connected`);
+    }
+    if (normalizeEmail(accountEmail) !== normalizeEmail(config.accountLabel)) {
+      throw new Error(`Account ${accountEmail} does not match connected account for ${provider}`);
+    }
+    if (!this.#relationshipReadScopePresent(provider, config)) {
+      throw new Error(
+        `Relationship sync read scope is not enabled for ${provider}`,
+      );
+    }
+    return this.#calendarConnector(provider);
+  }
+
 
   #calendarConnector(provider: ConnectorProvider): GoogleConnector | MicrosoftConnector {
     const options = {
