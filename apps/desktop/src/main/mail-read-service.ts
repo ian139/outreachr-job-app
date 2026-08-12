@@ -11,6 +11,113 @@ export interface MailReadServiceOptions {
   connectors: ConnectorService;
 }
 
+const MAX_BODY_BYTES = 1_048_576; // 1MiB
+
+function hasCrLf(value: string): boolean {
+  return value.includes('\r') || value.includes('\n');
+}
+
+function isValidEmail(email: string): boolean {
+  if (email.length > 320 || hasCrLf(email)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function validateBoundedString(
+  value: unknown,
+  name: string,
+  maxLength: number,
+  required = true,
+): string | undefined {
+  if (value === undefined || value === null) {
+    if (required) throw new Error(`${name} is required`);
+    return undefined;
+  }
+  if (typeof value !== 'string') throw new Error(`${name} must be a string`);
+  if (required && !value.trim()) throw new Error(`${name} must be a non-empty string`);
+  if (value.length > maxLength) throw new Error(`${name} exceeds maximum length of ${maxLength}`);
+  if (hasCrLf(value)) throw new Error(`${name} must not contain CRLF characters`);
+  return value;
+}
+
+function validateBoundedId(id: unknown, name: string, required = true): string | null {
+  if (id === undefined || id === null) {
+    if (required) throw new Error(`${name} is required from provider`);
+    return null;
+  }
+  if (typeof id !== 'string') throw new Error(`${name} must be a string`);
+  const trimmed = id.trim();
+  if (required && !trimmed) throw new Error(`${name} must be a non-empty string`);
+  if (trimmed.length > 4096 || hasCrLf(trimmed)) {
+    throw new Error(`${name} exceeds maximum length or contains invalid CRLF characters`);
+  }
+  return trimmed;
+}
+
+function validateTimestamp(ts: unknown, name: string): string {
+  if (typeof ts !== 'string' || !ts.trim() || ts.length > 100 || hasCrLf(ts)) {
+    throw new Error(`Invalid ${name} timestamp from provider`);
+  }
+  const time = Date.parse(ts);
+  if (Number.isNaN(time)) {
+    throw new Error(`Invalid ${name} timestamp format from provider`);
+  }
+  return ts;
+}
+
+function validateSourceUrl(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.length > 4096 || hasCrLf(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'https:') {
+      return parsed.toString();
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function validateBodyString(body: unknown, name: string): string | null {
+  if (body === undefined || body === null) return null;
+  if (typeof body !== 'string') throw new Error(`${name} must be a string or null`);
+  if (body.length > MAX_BODY_BYTES) {
+    throw new Error(`Provider ${name} exceeds 1MiB limit`);
+  }
+  return body;
+}
+
+function mapParticipant(participant: unknown): string {
+  if (typeof participant === 'string') {
+    const trimmed = participant.trim();
+    if (trimmed.length > 500 || hasCrLf(trimmed)) return 'unknown';
+    return trimmed;
+  }
+  if (participant && typeof participant === 'object' && 'email' in participant) {
+    const addr = participant as { email: string; name?: string };
+    const email = typeof addr.email === 'string' ? addr.email.trim() : '';
+    const name = typeof addr.name === 'string' ? addr.name.trim() : '';
+    if (name && !hasCrLf(name) && name.length <= 500) {
+      return `${name} <${email}>`;
+    }
+    return email;
+  }
+  return String(participant);
+}
+
+function mapEmailAddress(addr: { email: string; name?: string }): { email: string; name?: string } {
+  const email = typeof addr.email === 'string' ? addr.email.trim() : '';
+  if (!email || hasCrLf(email) || email.length > 320) {
+    throw new Error('Invalid email address in message participant');
+  }
+  const name = typeof addr.name === 'string' && addr.name.trim() ? addr.name.trim() : undefined;
+  if (name && !hasCrLf(name) && name.length <= 500) {
+    return { email, name };
+  }
+  return { email };
+}
+
 export class MailReadService {
   readonly #connectors: ConnectorService;
   readonly #activeRequests = new Map<string, AbortController>();
@@ -55,19 +162,24 @@ export class MailReadService {
         throw new Error('Request cancelled');
       }
 
+      const rawThreads = page.threads ?? [];
+      if (rawThreads.length > 50) {
+        throw new Error('Contract violation: connector returned more than 50 threads');
+      }
+
       return {
-        threads: (page.threads ?? []).map((thread) => ({
+        threads: rawThreads.map((thread) => ({
           provider: thread.provider,
-          accountEmail: thread.accountEmail,
-          threadId: thread.threadId,
-          subject: thread.subject ?? '',
-          snippet: thread.snippet ?? null,
-          participants: Array.isArray(thread.participants) ? thread.participants : [],
-          latestAt: thread.latestAt,
-          messageCount: typeof thread.messageCount === 'number' ? thread.messageCount : 0,
-          sourceUrl: thread.sourceUrl ?? null,
+          accountEmail: request.accountEmail,
+          threadId: validateBoundedId(thread.threadId, 'threadId', true)!,
+          subject: validateBoundedString(thread.subject ?? '', 'subject', 4096, false) ?? '',
+          snippet: thread.snippet ? validateBoundedString(thread.snippet, 'snippet', 4096, false) ?? null : null,
+          participants: (Array.isArray(thread.participants) ? thread.participants : []).map(mapParticipant),
+          latestAt: validateTimestamp(thread.latestAt, 'latestAt'),
+          messageCount: typeof thread.messageCount === 'number' && thread.messageCount >= 0 ? thread.messageCount : 0,
+          sourceUrl: validateSourceUrl(thread.sourceUrl),
         })),
-        nextCursor: page.nextPageToken ?? null,
+        nextCursor: page.nextPageToken ? validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null : null,
       };
     } catch (error) {
       if (controller.signal.aborted) {
@@ -117,39 +229,44 @@ export class MailReadService {
         throw new Error('Request cancelled');
       }
 
+      const rawMessages = page.messages ?? [];
+      if (rawMessages.length > 50) {
+        throw new Error('Contract violation: connector returned more than 50 messages');
+      }
+
       return {
         thread: {
           provider: page.thread.provider,
-          accountEmail: page.thread.accountEmail,
-          threadId: page.thread.threadId,
-          subject: page.thread.subject ?? '',
-          snippet: page.thread.snippet ?? null,
-          participants: Array.isArray(page.thread.participants) ? page.thread.participants : [],
-          latestAt: page.thread.latestAt,
-          messageCount: typeof page.thread.messageCount === 'number' ? page.thread.messageCount : 0,
-          sourceUrl: page.thread.sourceUrl ?? null,
+          accountEmail: request.accountEmail,
+          threadId: validateBoundedId(page.thread.threadId, 'threadId', true)!,
+          subject: validateBoundedString(page.thread.subject ?? '', 'subject', 4096, false) ?? '',
+          snippet: page.thread.snippet ? validateBoundedString(page.thread.snippet, 'snippet', 4096, false) ?? null : null,
+          participants: (Array.isArray(page.thread.participants) ? page.thread.participants : []).map(mapParticipant),
+          latestAt: validateTimestamp(page.thread.latestAt, 'latestAt'),
+          messageCount: typeof page.thread.messageCount === 'number' && page.thread.messageCount >= 0 ? page.thread.messageCount : 0,
+          sourceUrl: validateSourceUrl(page.thread.sourceUrl),
         },
-        messages: (page.messages ?? []).map((msg) => ({
+        messages: rawMessages.map((msg) => ({
           provider: msg.provider,
-          accountEmail: msg.accountEmail,
-          threadId: msg.threadId,
-          messageId: msg.id,
-          internetMessageId: msg.internetMessageId ?? null,
-          subject: msg.subject ?? '',
-          from: { email: msg.from.email, name: msg.from.name },
-          to: (msg.to ?? []).map((addr) => ({ email: addr.email, name: addr.name })),
-          cc: (msg.cc ?? []).map((addr) => ({ email: addr.email, name: addr.name })),
-          occurredAt: msg.occurredAt,
-          labels: Array.isArray(msg.labels) ? msg.labels : [],
-          direction: msg.direction ?? null,
-          bodyText: msg.bodyText ?? null,
-          bodyHtml: msg.bodyHtml ?? null,
+          accountEmail: request.accountEmail,
+          threadId: validateBoundedId(msg.threadId, 'threadId', true)!,
+          messageId: validateBoundedId(msg.id, 'messageId', true)!,
+          internetMessageId: validateBoundedId(msg.internetMessageId, 'internetMessageId', false),
+          subject: validateBoundedString(msg.subject ?? '', 'subject', 4096, false) ?? '',
+          from: mapEmailAddress(msg.from),
+          to: (msg.to ?? []).map(mapEmailAddress),
+          cc: (msg.cc ?? []).map(mapEmailAddress),
+          occurredAt: validateTimestamp(msg.occurredAt, 'occurredAt'),
+          labels: (Array.isArray(msg.labels) ? msg.labels : []).map((l) => validateBoundedString(l, 'label', 100, true)!),
+          direction: msg.direction === 'inbound' || msg.direction === 'outbound' ? msg.direction : null,
+          bodyText: validateBodyString(msg.bodyText, 'bodyText'),
+          bodyHtml: validateBodyString(msg.bodyHtml, 'bodyHtml'),
           providerTruncated: Boolean(msg.providerTruncated),
-          truncationReason: msg.truncationReason ?? null,
-          sourceUrl: msg.sourceUrl ?? null,
-          fetchedAt: msg.fetchedAt,
+          truncationReason: msg.truncationReason ? validateBoundedString(msg.truncationReason, 'truncationReason', 1000, false) ?? null : null,
+          sourceUrl: validateSourceUrl(msg.sourceUrl),
+          fetchedAt: validateTimestamp(msg.fetchedAt, 'fetchedAt'),
         })),
-        nextCursor: page.nextPageToken ?? null,
+        nextCursor: page.nextPageToken ? validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null : null,
       };
     } catch (error) {
       if (controller.signal.aborted) {
@@ -164,9 +281,7 @@ export class MailReadService {
   }
 
   cancelMailRequest(requestId: string): void {
-    if (typeof requestId !== 'string' || !requestId.trim()) {
-      throw new Error('requestId must be a non-empty string');
-    }
+    validateBoundedString(requestId, 'requestId', 4096, true);
     const controller = this.#activeRequests.get(requestId);
     if (controller) {
       controller.abort(new Error('Request cancelled'));
@@ -189,17 +304,15 @@ export class MailReadService {
     if (!request || typeof request !== 'object') {
       throw new Error('Invalid request payload');
     }
-    if (typeof request.requestId !== 'string' || !request.requestId.trim()) {
-      throw new Error('requestId must be a non-empty string');
-    }
+    validateBoundedString(request.requestId, 'requestId', 4096, true);
     if (
       (request.provider as unknown) !== 'google' &&
       (request.provider as unknown) !== 'microsoft'
     ) {
       throw new Error(`Unsupported or invalid provider: ${String(request.provider)}`);
     }
-    if (typeof request.accountEmail !== 'string' || !request.accountEmail.trim()) {
-      throw new Error('accountEmail must be a non-empty string');
+    if (typeof request.accountEmail !== 'string' || !isValidEmail(request.accountEmail)) {
+      throw new Error('accountEmail must be a valid email address up to 320 characters without CRLF');
     }
     if (
       typeof request.limit !== 'number' ||
@@ -209,11 +322,11 @@ export class MailReadService {
     ) {
       throw new Error('Limit must be an integer between 1 and 50');
     }
-    if (request.query !== undefined && typeof request.query !== 'string') {
-      throw new Error('query must be a string if provided');
+    if (request.query !== undefined) {
+      validateBoundedString(request.query, 'query', 1000, false);
     }
-    if (request.cursor !== undefined && typeof request.cursor !== 'string') {
-      throw new Error('cursor must be a string if provided');
+    if (request.cursor !== undefined) {
+      validateBoundedString(request.cursor, 'cursor', 4096, false);
     }
   }
 
@@ -221,21 +334,17 @@ export class MailReadService {
     if (!request || typeof request !== 'object') {
       throw new Error('Invalid request payload');
     }
-    if (typeof request.requestId !== 'string' || !request.requestId.trim()) {
-      throw new Error('requestId must be a non-empty string');
-    }
+    validateBoundedString(request.requestId, 'requestId', 4096, true);
     if (
       (request.provider as unknown) !== 'google' &&
       (request.provider as unknown) !== 'microsoft'
     ) {
       throw new Error(`Unsupported or invalid provider: ${String(request.provider)}`);
     }
-    if (typeof request.accountEmail !== 'string' || !request.accountEmail.trim()) {
-      throw new Error('accountEmail must be a non-empty string');
+    if (typeof request.accountEmail !== 'string' || !isValidEmail(request.accountEmail)) {
+      throw new Error('accountEmail must be a valid email address up to 320 characters without CRLF');
     }
-    if (typeof request.threadId !== 'string' || !request.threadId.trim()) {
-      throw new Error('threadId must be a non-empty string');
-    }
+    validateBoundedString(request.threadId, 'threadId', 4096, true);
     if (
       typeof request.limit !== 'number' ||
       !Number.isInteger(request.limit) ||
@@ -244,8 +353,8 @@ export class MailReadService {
     ) {
       throw new Error('Limit must be an integer between 1 and 50');
     }
-    if (request.cursor !== undefined && typeof request.cursor !== 'string') {
-      throw new Error('cursor must be a string if provided');
+    if (request.cursor !== undefined) {
+      validateBoundedString(request.cursor, 'cursor', 4096, false);
     }
   }
 }

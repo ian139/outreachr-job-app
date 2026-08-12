@@ -169,6 +169,55 @@ describe('MailReadService & Bridge IPC', () => {
         'threadId must be a non-empty string',
       );
     });
+
+    it('rejects CRLF characters in query, cursor, threadId, or requestId', async () => {
+      const crlfReq: ListMailThreadsRequest = {
+        requestId: 'req-1\r\nattacker',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+      };
+      await expect(service.listMailThreads(crlfReq)).rejects.toThrow('must not contain CRLF');
+
+      const crlfQuery: ListMailThreadsRequest = {
+        requestId: 'req-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+        query: 'search\nquery',
+      };
+      await expect(service.listMailThreads(crlfQuery)).rejects.toThrow('must not contain CRLF');
+    });
+
+    it('rejects query exceeding 1000 characters or cursor exceeding 4096 characters', async () => {
+      const longQuery: ListMailThreadsRequest = {
+        requestId: 'req-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+        query: 'a'.repeat(1001),
+      };
+      await expect(service.listMailThreads(longQuery)).rejects.toThrow('exceeds maximum length of 1000');
+
+      const longCursor: ListMailThreadsRequest = {
+        requestId: 'req-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+        cursor: 'c'.repeat(4097),
+      };
+      await expect(service.listMailThreads(longCursor)).rejects.toThrow('exceeds maximum length of 4096');
+    });
+
+    it('validates accountEmail length, CRLF, and basic email format', async () => {
+      const badEmail: ListMailThreadsRequest = {
+        requestId: 'req-1',
+        provider: 'google',
+        accountEmail: 'invalid-email-format',
+        limit: 10,
+      };
+      await expect(service.listMailThreads(badEmail)).rejects.toThrow('accountEmail must be a valid email address');
+    });
   });
 
   describe('Connected Account & Scope Validation', () => {
@@ -257,6 +306,118 @@ describe('MailReadService & Bridge IPC', () => {
       expect(msg.bodyText).toBe('Hello world text body');
       expect(msg.bodyHtml).toBe('<p>Hello world html body</p>');
       expect(msg.direction).toBe('inbound');
+    });
+    it('defensively throws contract violation if provider returns > 50 threads or messages', async () => {
+      vi.mocked(mockConnector.listMailboxThreads).mockResolvedValue({
+        threads: Array.from({ length: 51 }, (_, i) => ({
+          provider: 'google',
+          accountEmail: 'user@example.com',
+          threadId: `t-${i}`,
+          subject: 'Sub',
+          participants: [],
+          latestAt: '2026-08-12T10:00:00Z',
+          messageCount: 1,
+        })),
+      });
+
+      const request: ListMailThreadsRequest = {
+        requestId: 'req-overflow-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 50,
+      };
+
+      await expect(service.listMailThreads(request)).rejects.toThrow(
+        'Contract violation: connector returned more than 50 threads',
+      );
+    });
+
+    it('maps participant objects to "Name <email>" and omits name property when absent under exactOptionalPropertyTypes', async () => {
+      vi.mocked(mockConnector.getMailboxThread).mockResolvedValue({
+        thread: {
+          provider: 'google',
+          accountEmail: 'user@example.com',
+          threadId: 'thread-1',
+          subject: 'Test Thread',
+          participants: [{ email: 'alice@example.com', name: 'Alice' }, { email: 'bob@example.com' }] as unknown as string[],
+          latestAt: '2026-08-12T10:00:00Z',
+          messageCount: 1,
+        },
+        messages: [
+          {
+            provider: 'google',
+            accountEmail: 'user@example.com',
+            threadId: 'thread-1',
+            id: 'msg-1',
+            subject: 'Test Message',
+            from: { email: 'no-name@example.com' },
+            to: [{ email: 'alice@example.com', name: 'Alice' }],
+            cc: [],
+            occurredAt: '2026-08-12T10:00:00Z',
+            labels: ['INBOX'],
+            bodyText: 'Text',
+            bodyHtml: null,
+            providerTruncated: false,
+            fetchedAt: '2026-08-12T10:01:00Z',
+          },
+        ],
+      });
+
+      const request: GetMailThreadRequest = {
+        requestId: 'req-exact-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        threadId: 'thread-1',
+        limit: 10,
+      };
+
+      const result = await service.getMailThread(request);
+
+      expect(result.thread.participants).toEqual(['Alice <alice@example.com>', 'bob@example.com']);
+      expect(result.messages[0]!.from).toEqual({ email: 'no-name@example.com' });
+      expect('name' in result.messages[0]!.from).toBe(false);
+    });
+
+    it('rejects provider message bodies exceeding 1MiB and filters non-HTTPS source URLs to null', async () => {
+      vi.mocked(mockConnector.getMailboxThread).mockResolvedValue({
+        thread: {
+          provider: 'google',
+          accountEmail: 'user@example.com',
+          threadId: 'thread-1',
+          subject: 'Test Thread',
+          participants: [],
+          latestAt: '2026-08-12T10:00:00Z',
+          messageCount: 1,
+          sourceUrl: 'http://insecure.example.com/item', // Non-HTTPS -> null
+        },
+        messages: [
+          {
+            provider: 'google',
+            accountEmail: 'user@example.com',
+            threadId: 'thread-1',
+            id: 'msg-1',
+            subject: 'Test Message',
+            from: { email: 'alice@example.com' },
+            to: [],
+            cc: [],
+            occurredAt: '2026-08-12T10:00:00Z',
+            labels: [],
+            bodyText: 'x'.repeat(1_048_577), // Exceeds 1MiB
+            providerTruncated: false,
+            fetchedAt: '2026-08-12T10:01:00Z',
+          },
+        ],
+      });
+
+      const request: GetMailThreadRequest = {
+        requestId: 'req-large-1',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        threadId: 'thread-1',
+        limit: 10,
+      };
+
+      await expect(service.getMailThread(request)).rejects.toThrow('Provider bodyText exceeds 1MiB limit');
     });
   });
 
