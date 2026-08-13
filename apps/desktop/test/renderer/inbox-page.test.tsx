@@ -435,6 +435,81 @@ describe('InboxPage component & messaging behavior', () => {
     expect(openExternal).toHaveBeenCalledWith('https://mail.google.com/mail/u/0/#inbox/thread_1');
   });
 
+  it('defaults to the job-relevant mail view and shows the active mode', async () => {
+    const { listMailThreads } = setupInboxFixture();
+    renderInboxPage();
+
+    await screen.findByText('Job Application Followup');
+
+    const modeGroup = screen.getByRole('group', { name: /mail view/i });
+    expect(modeGroup).toBeInTheDocument();
+    const jobButton = screen.getByRole('button', { name: 'Job relevant' });
+    const allButton = screen.getByRole('button', { name: 'All mail' });
+    expect(jobButton).toHaveAttribute('aria-pressed', 'true');
+    expect(allButton).toHaveAttribute('aria-pressed', 'false');
+
+    expect(listMailThreads).toHaveBeenCalledWith(
+      expect.objectContaining({ mailViewMode: 'job-relevant' }),
+    );
+    expect(screen.getByText(/Showing job-relevant mail/i)).toBeInTheDocument();
+  });
+
+  it('switching to All mail refetches unfiltered and preserves the search query', async () => {
+    const { listMailThreads } = setupInboxFixture();
+    renderInboxPage();
+
+    await screen.findByText('Job Application Followup');
+
+    const searchInput = screen.getByPlaceholderText('Search mail...');
+    fireEvent.change(searchInput, { target: { value: 'offer' } });
+    await waitFor(() =>
+      expect(listMailThreads).toHaveBeenLastCalledWith(
+        expect.objectContaining({ mailViewMode: 'job-relevant', query: 'offer' }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'All mail' }));
+
+    await waitFor(() =>
+      expect(listMailThreads).toHaveBeenLastCalledWith(
+        expect.objectContaining({ mailViewMode: 'all', query: 'offer' }),
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'All mail' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Job relevant' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByText(/Showing all mail \(unfiltered\)/i)).toBeInTheDocument();
+  });
+
+  it('exposes All mail as the transparent raw unfiltered escape hatch', async () => {
+    const { listMailThreads } = setupInboxFixture();
+    renderInboxPage();
+
+    await screen.findByText('Job Application Followup');
+    const allButton = screen.getByRole('button', { name: 'All mail' });
+    expect(allButton).toHaveAttribute('title');
+    fireEvent.click(allButton);
+
+    await waitFor(() =>
+      expect(listMailThreads).toHaveBeenLastCalledWith(
+        expect.objectContaining({ mailViewMode: 'all' }),
+      ),
+    );
+    // All mail requests must not be constrained to the job-relevant window.
+    const allCalls = listMailThreads.mock.calls.filter(
+      (call) => (call[0] as { mailViewMode?: string }).mailViewMode === 'all',
+    );
+    expect(allCalls.length).toBeGreaterThan(0);
+    for (const call of allCalls) {
+      expect(call[0]).not.toHaveProperty('jobRelevantOnly');
+    }
+  });
+
   it('handles mobile Back to inbox button navigation and unmount cleanup', async () => {
     const { cancelMailRequest } = setupInboxFixture();
     const { unmount } = renderInboxPage();

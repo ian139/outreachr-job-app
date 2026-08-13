@@ -4,6 +4,7 @@ export * from './google.js';
 export * from './mailbox.js';
 export * from './microsoft.js';
 export * from './oauth.js';
+export * from './relevance.js';
 export * from './safety.js';
 export * from './scopes.js';
 export * from './types.js';

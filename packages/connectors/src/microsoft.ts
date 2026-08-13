@@ -14,6 +14,11 @@ import {
   validateMailboxThreadListInput,
 } from './mailbox.js';
 import { executeGuardedSend } from './send.js';
+import {
+  isJobRelevantMailMetadata,
+  matchesUserSearchTokens,
+  MAX_LOCAL_FILTER_SCAN_PAGES,
+} from './relevance.js';
 import type {
   CalendarAttendee,
   CalendarConnector,
@@ -635,7 +640,21 @@ export class MicrosoftConnector
   async listMailboxThreads(input: ListMailboxThreadsInput): Promise<MailboxThreadPage> {
     validateMailboxThreadListInput(input);
     const pageSize = Math.min(input.pageSize ?? 50, 50);
+    if (input.mailViewMode === 'all') {
+      return this.#listAllMailboxThreads(input, pageSize);
+    }
+    return this.#listJobRelevantMailboxThreads(input, pageSize);
+  }
 
+  /**
+   * Raw, unfiltered listing (explicit `all` mode). Preserves provider-side
+   * `$search` for the user query (quoted and quote-stripped) and `$orderby`
+   * when no query is given.
+   */
+  async #listAllMailboxThreads(
+    input: ListMailboxThreadsInput,
+    pageSize: number,
+  ): Promise<MailboxThreadPage> {
     let url: URL;
     if (input.pageToken) {
       const base = new URL(this.#graphBaseUrl);
@@ -656,26 +675,89 @@ export class MicrosoftConnector
       url.searchParams.set('$top', String(pageSize));
     }
 
+    const page = await this.#fetchGraphThreadPage(url, input.signal);
+    return this.#buildThreadPage(page.value ?? [], input.accountEmail, page['@odata.nextLink']);
+  }
+
+  /**
+   * Default job-relevant mode. Microsoft Graph has no server-side term search
+   * for arbitrary OR sets, so relevance and user-search tokens are applied to
+   * list metadata (subject, sender, bodyPreview) locally. Pages are scanned
+   * deterministically (bounded by MAX_LOCAL_FILTER_SCAN_PAGES) and the
+   * nextLink of the last consumed page is returned, so pagination continues
+   * without skipping or dropping messages. User text is never interpolated
+   * into a provider query language.
+   */
+  async #listJobRelevantMailboxThreads(
+    input: ListMailboxThreadsInput,
+    pageSize: number,
+  ): Promise<MailboxThreadPage> {
+    let url: URL;
+    if (input.pageToken) {
+      const base = new URL(this.#graphBaseUrl);
+      url = microsoftMailPageUrl(input.pageToken, this.#graphBaseUrl, 'graph.threads.list', [
+        `${base.pathname}/me/messages`,
+      ]);
+    } else {
+      url = new URL(`${this.#graphBaseUrl}/me/messages`);
+      url.searchParams.set(
+        '$select',
+        'id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isDraft,webLink,bodyPreview',
+      );
+      url.searchParams.set('$orderby', 'receivedDateTime desc');
+      url.searchParams.set('$top', String(pageSize));
+    }
+
+    const collected: GraphMessageJson[] = [];
+    const seenThreads = new Set<string>();
+    let nextLink: string | undefined;
+    for (let scanned = 0; scanned < MAX_LOCAL_FILTER_SCAN_PAGES; scanned += 1) {
+      const page = await this.#fetchGraphThreadPage(url, input.signal);
+      nextLink = page['@odata.nextLink'];
+      for (const msg of page.value ?? []) {
+        if (msg.isDraft === true) continue;
+        if (!this.#isJobRelevantMessage(msg, input.query)) continue;
+        const threadId =
+          (typeof msg.conversationId === 'string' && msg.conversationId.trim()) || msg.id;
+        if (!threadId) continue;
+        seenThreads.add(threadId);
+        collected.push(msg);
+      }
+      if (seenThreads.size >= pageSize || !nextLink) break;
+      const base = new URL(this.#graphBaseUrl);
+      url = microsoftMailPageUrl(nextLink, this.#graphBaseUrl, 'graph.threads.list', [
+        `${base.pathname}/me/messages`,
+      ]);
+    }
+
+    return this.#buildThreadPage(collected, input.accountEmail, nextLink);
+  }
+
+  async #fetchGraphThreadPage(
+    url: URL,
+    signal: AbortSignal | undefined,
+  ): Promise<{ value?: GraphMessageJson[]; '@odata.nextLink'?: string }> {
     const response = await this.#request(
       'graph.threads.list',
       url.toString(),
       {
         headers: { Prefer: 'outlook.body-content-type="text", IdType="ImmutableId"' },
-        signal: input.signal,
+        signal,
       },
       false,
       true,
     );
+    return parseJson<{ value?: GraphMessageJson[]; '@odata.nextLink'?: string }>(response);
+  }
 
-    const page = await parseJson<{
-      value?: GraphMessageJson[];
-      '@odata.nextLink'?: string;
-    }>(response);
-
-    const rawMessages = (page.value ?? []).filter((msg) => msg.isDraft !== true);
-
+  #buildThreadPage(
+    messages: GraphMessageJson[],
+    accountEmail: string,
+    nextPageToken: string | undefined,
+  ): MailboxThreadPage {
     const threadMap = new Map<string, GraphMessageJson[]>();
-    for (const msg of rawMessages) {
+    for (const msg of messages) {
+      if (msg.isDraft === true) continue;
       const threadId =
         (typeof msg.conversationId === 'string' && msg.conversationId.trim()) || msg.id;
       if (!threadId) continue;
@@ -689,14 +771,29 @@ export class MicrosoftConnector
 
     const threads: MailboxThread[] = [];
     for (const [threadId, msgs] of threadMap.entries()) {
-      const thread = mapGraphThreadSummary(msgs, input.accountEmail, threadId);
+      const thread = mapGraphThreadSummary(msgs, accountEmail, threadId);
       if (thread) threads.push(thread);
     }
 
-    return {
-      threads,
-      nextPageToken: page['@odata.nextLink'],
+    return { threads, nextPageToken };
+  }
+
+  #isJobRelevantMessage(msg: GraphMessageJson, userQuery: string | undefined): boolean {
+    const from = msg.from?.emailAddress;
+    const metadata = {
+      subject: msg.subject ?? '',
+      fromName: from?.name,
+      fromAddress: from?.address,
+      bodyPreview: msg.bodyPreview,
     };
+    return (
+      isJobRelevantMailMetadata(
+        metadata.subject,
+        metadata.fromName,
+        metadata.fromAddress,
+        metadata.bodyPreview,
+      ) && matchesUserSearchTokens(metadata, userQuery)
+    );
   }
 
   async getMailboxThread(input: GetMailboxThreadInput): Promise<MailboxThreadMessagesPage> {

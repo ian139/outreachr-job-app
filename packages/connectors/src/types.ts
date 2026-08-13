@@ -1,6 +1,16 @@
 export type ConnectorProvider = 'google' | 'microsoft';
 
 /**
+ * Explicit mail view mode. `job-relevant` (the default) restricts the thread
+ * list to job-application conversations (applications, recruiters,
+ * interviews, offers/rejections, scheduling, hiring, follow-ups) using list
+ * metadata/search semantics only; `all` lists the raw mailbox unfiltered.
+ * The mode must never mutate or delete provider mail and must never affect
+ * exhaustive relationship sync, which uses `listMailboxMessages` directly.
+ */
+export type MailViewMode = 'job-relevant' | 'all';
+
+/**
  * Provider-neutral capability summary for a connector scope profile. The
  * profile is persisted and exposed explicitly so inbox reading is never
  * conflated with send-ready relationship sync: read-only grants inbox reads
@@ -215,6 +225,8 @@ export interface MailboxMessageBody extends MailboxMessage {
 
 export interface ListMailboxThreadsInput {
   accountEmail: string;
+  /** Defaults to `job-relevant`; `all` lists the raw mailbox unfiltered. */
+  mailViewMode?: MailViewMode;
   query?: string;
   pageSize?: number;
   pageToken?: string;

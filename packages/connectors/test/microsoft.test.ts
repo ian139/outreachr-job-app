@@ -490,6 +490,7 @@ describe('Microsoft Graph mail and calendar connector', () => {
 
     const result = await connector.listMailboxThreads({
       accountEmail: 'applicant@example.com',
+      mailViewMode: 'all',
       query: 'application',
       pageSize: 10,
     });
@@ -540,6 +541,129 @@ describe('Microsoft Graph mail and calendar connector', () => {
     ).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
     });
+  });
+
+  it('defaults to job-relevant mode, filtering Microsoft threads from metadata with continuous pagination', async () => {
+    let calls = 0;
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        calls += 1;
+        if (calls === 1) {
+          expect(url.searchParams.get('$search')).toBeNull();
+          expect(url.searchParams.get('$orderby')).toBe('receivedDateTime desc');
+          return HttpResponse.json({
+            value: [
+              {
+                id: 'ms-msg-1',
+                conversationId: 'conv-101',
+                subject: 'Interview invitation',
+                bodyPreview: 'Please schedule a time',
+                from: { emailAddress: { address: 'recruiter@acme.com', name: 'Acme Recruiter' } },
+                toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+                receivedDateTime: '2026-08-05T12:00:00Z',
+                webLink: 'https://outlook.office.com/mail/id/ms-msg-1',
+              },
+              {
+                id: 'ms-msg-2',
+                conversationId: 'conv-200',
+                subject: 'Weekly newsletter',
+                bodyPreview: 'Tips for founders',
+                from: { emailAddress: { address: 'news@example.com', name: 'Example News' } },
+                toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+                receivedDateTime: '2026-08-05T11:00:00Z',
+                webLink: 'https://outlook.office.com/mail/id/ms-msg-2',
+              },
+            ],
+            '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=opaque2',
+          });
+        }
+        // Second request follows the provider continuation link; it is a
+        // fresh Graph URL and must not carry the first request's parameters.
+        expect(url.searchParams.get('$skiptoken')).toBe('opaque2');
+        return HttpResponse.json({
+          value: [
+            {
+              id: 'ms-msg-3',
+              conversationId: 'conv-300',
+              subject: 'Job offer',
+              bodyPreview: 'We are pleased to offer you the role',
+              from: { emailAddress: { address: 'hr@bigtech.com', name: 'BigTech HR' } },
+              toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+              receivedDateTime: '2026-08-05T10:00:00Z',
+              webLink: 'https://outlook.office.com/mail/id/ms-msg-3',
+            },
+          ],
+        });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+    });
+
+    // The scan followed the first page's nextLink to a second metadata page,
+    // proving pagination continues without dropping filtered-out messages.
+    expect(calls).toBe(2);
+    expect(result.threads.map((t) => t.subject).sort()).toEqual([
+      'Interview invitation',
+      'Job offer',
+    ]);
+    expect(result.threads.some((t) => t.subject === 'Weekly newsletter')).toBe(false);
+    expect(result.nextPageToken).toBeUndefined();
+  });
+
+  it('job-relevant mode applies user search tokens locally and never sends provider search', async () => {
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('$search')).toBeNull();
+        expect(url.searchParams.get('$orderby')).toBe('receivedDateTime desc');
+        return HttpResponse.json({
+          value: [
+            {
+              id: 'ms-msg-1',
+              conversationId: 'conv-101',
+              subject: 'Interview invitation',
+              bodyPreview: 'Please schedule a time',
+              from: { emailAddress: { address: 'recruiter@acme.com', name: 'Acme Recruiter' } },
+              toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+              receivedDateTime: '2026-08-05T12:00:00Z',
+              webLink: 'https://outlook.office.com/mail/id/ms-msg-1',
+            },
+            {
+              id: 'ms-msg-3',
+              conversationId: 'conv-300',
+              subject: 'Job offer',
+              bodyPreview: 'We are pleased to offer you the role',
+              from: { emailAddress: { address: 'hr@bigtech.com', name: 'BigTech HR' } },
+              toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+              receivedDateTime: '2026-08-05T10:00:00Z',
+              webLink: 'https://outlook.office.com/mail/id/ms-msg-3',
+            },
+          ],
+        });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      query: 'offer',
+      pageSize: 10,
+    });
+
+    expect(result.threads.map((t) => t.subject)).toEqual(['Job offer']);
+  });
+
+  it('rejects invalid mail view modes for Microsoft thread listing', async () => {
+    await expect(
+      client().listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        mailViewMode: 'promotions' as never,
+        pageSize: 10,
+      }),
+    ).rejects.toThrow('Mail view mode must be job-relevant or all');
   });
 
   it('gets Microsoft mailbox thread with plain/HTML, pre/table/quoted, direction, webLink, cancellation, and truncation', async () => {

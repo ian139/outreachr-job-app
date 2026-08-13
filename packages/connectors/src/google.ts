@@ -22,6 +22,7 @@ import {
   validateMailboxThreadListInput,
 } from './mailbox.js';
 import { executeGuardedSend } from './send.js';
+import { composeGmailThreadQuery } from './relevance.js';
 import type {
   CalendarAttendee,
   CalendarConnector,
@@ -663,7 +664,8 @@ export class GoogleConnector
     validateMailboxThreadListInput(input);
     const pageSize = Math.min(input.pageSize ?? 50, 50);
     const url = new URL(`${this.#gmailBaseUrl}/users/${encodeURIComponent(this.#userId)}/threads`);
-    if (input.query) url.searchParams.set('q', input.query);
+    const query = composeGmailThreadQuery(input.mailViewMode, input.query);
+    if (query) url.searchParams.set('q', query);
     url.searchParams.set('maxResults', String(pageSize));
     if (input.pageToken) url.searchParams.set('pageToken', input.pageToken);
 

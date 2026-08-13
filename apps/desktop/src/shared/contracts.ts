@@ -43,6 +43,14 @@ export type PipelineStage =
 
 export type Confidence = 'verified' | 'supported' | 'inferred' | 'unknown' | 'stale';
 export type ConnectorProvider = 'google' | 'microsoft';
+/**
+ * Explicit mail view mode. `job-relevant` (the default) filters the thread
+ * list to job-application conversations using provider-side list metadata
+ * only; `all` is the explicit escape hatch that lists the raw mailbox
+ * unfiltered. The mode never affects exhaustive relationship sync/audit,
+ * which continue to use the raw provider message stream.
+ */
+export type MailViewMode = 'job-relevant' | 'all';
 export type AgentProvider = 'codex' | 'claude';
 
 /**
@@ -202,6 +210,8 @@ export interface ListMailThreadsRequest {
   requestId: string;
   provider: ConnectorProvider;
   accountEmail: string;
+  /** Defaults to `job-relevant`; `all` is the explicit raw-mail escape hatch. */
+  mailViewMode?: MailViewMode;
   query?: string;
   limit: number;
   cursor?: string;

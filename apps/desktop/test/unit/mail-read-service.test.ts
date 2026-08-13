@@ -474,6 +474,104 @@ describe('MailReadService & Bridge IPC', () => {
     });
   });
 
+  describe('Mail View Mode', () => {
+    it('defaults to the job-relevant view when mailViewMode is omitted and forwards explicit all mode', async () => {
+      const defaultReq: ListMailThreadsRequest = {
+        requestId: 'req-mode-default',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+      };
+      await service.listMailThreads(defaultReq);
+
+      const defaultCall = vi.mocked(mockConnector.listMailboxThreads).mock.calls[0]![0];
+      expect(defaultCall.mailViewMode).toBeUndefined();
+      expect(defaultCall.query).toBeUndefined();
+
+      const allReq: ListMailThreadsRequest = {
+        requestId: 'req-mode-all',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        mailViewMode: 'all',
+        query: 'application',
+        limit: 10,
+      };
+      await service.listMailThreads(allReq);
+
+      expect(mockConnector.listMailboxThreads).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          accountEmail: 'user@example.com',
+          mailViewMode: 'all',
+          query: 'application',
+          pageSize: 10,
+        }),
+      );
+    });
+
+    it('forwards the job-relevant view mode and search query together', async () => {
+      const request: ListMailThreadsRequest = {
+        requestId: 'req-mode-job',
+        provider: 'microsoft',
+        accountEmail: 'user@example.com',
+        mailViewMode: 'job-relevant',
+        query: 'offer',
+        limit: 20,
+      };
+
+      await service.listMailThreads(request);
+
+      expect(mockConnector.listMailboxThreads).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountEmail: 'user@example.com',
+          mailViewMode: 'job-relevant',
+          query: 'offer',
+          pageSize: 20,
+        }),
+      );
+    });
+
+    it('rejects invalid mail view modes', async () => {
+      const request: ListMailThreadsRequest = {
+        requestId: 'req-mode-invalid',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        mailViewMode: 'promotions' as never,
+        limit: 10,
+      };
+
+      await expect(service.listMailThreads(request)).rejects.toThrow(
+        'Mail view mode must be job-relevant or all',
+      );
+      expect(mockConnector.listMailboxThreads).not.toHaveBeenCalled();
+    });
+
+    it('keeps the exhaustive relationship-sync message stream untouched', async () => {
+      const request: ListMailThreadsRequest = {
+        requestId: 'req-mode-sync',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        mailViewMode: 'all',
+        limit: 10,
+      };
+      await service.listMailThreads(request);
+
+      // Thread listing must never consume the raw message stream used by
+      // exhaustive relationship sync/audit.
+      expect(mockConnector.listMailboxMessages).not.toHaveBeenCalled();
+
+      // Relationship sync continues to read the raw stream with the legacy
+      // input shape (no view mode leaks into it).
+      await mockConnector.listMailboxMessages({
+        mailbox: 'all',
+        pageSize: 100,
+      });
+      expect(mockConnector.listMailboxMessages).toHaveBeenCalledWith({
+        mailbox: 'all',
+        pageSize: 100,
+      });
+    });
+  });
+
   describe('Privacy & Request-Memory Isolation', () => {
     it('returns message bodies in response memory without persisting to SQLite vault', async () => {
       const request: GetMailThreadRequest = {

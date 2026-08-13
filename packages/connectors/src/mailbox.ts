@@ -60,6 +60,13 @@ export function validateMailboxThreadListInput(input: ListMailboxThreadsInput): 
     throw new TypeError('Account email is invalid');
   }
   if (
+    input.mailViewMode !== undefined &&
+    input.mailViewMode !== 'job-relevant' &&
+    input.mailViewMode !== 'all'
+  ) {
+    throw new TypeError('Mail view mode must be job-relevant or all');
+  }
+  if (
     input.query !== undefined &&
     (typeof input.query !== 'string' || input.query.length > 1000 || /[\r\n]/u.test(input.query))
   ) {

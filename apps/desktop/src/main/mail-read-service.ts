@@ -148,6 +148,7 @@ export class MailReadService {
 
       const page = await connector.listMailboxThreads({
         accountEmail: request.accountEmail,
+        ...(request.mailViewMode ? { mailViewMode: request.mailViewMode } : {}),
         ...(request.query ? { query: request.query } : {}),
         pageSize: request.limit,
         ...(request.cursor ? { pageToken: request.cursor } : {}),
@@ -343,6 +344,13 @@ export class MailReadService {
     }
     if (request.query !== undefined) {
       validateBoundedString(request.query, 'query', 1000, false);
+    }
+    if (
+      request.mailViewMode !== undefined &&
+      request.mailViewMode !== 'job-relevant' &&
+      request.mailViewMode !== 'all'
+    ) {
+      throw new Error('Mail view mode must be job-relevant or all');
     }
     if (request.cursor !== undefined) {
       validateBoundedString(request.cursor, 'cursor', 4096, false);

@@ -5,6 +5,7 @@ import type {
   ConnectorStatus,
   MailThreadPage,
   MailThreadSummary,
+  MailViewMode,
 } from '../../../shared/contracts';
 import { Badge, Button, EmptyState, SearchField } from '../components/ui';
 import { htmlToPlainText, sanitizeHtml } from '../lib/sanitizer';
@@ -83,6 +84,12 @@ export function InboxPage(): React.JSX.Element {
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  /**
+   * Explicit mail view mode. `job-relevant` (default) filters the thread list
+   * to job-application conversations using provider-side list metadata;
+   * `all` is the explicit escape hatch that lists the raw mailbox unfiltered.
+   */
+  const [mailViewMode, setMailViewMode] = useState<MailViewMode>('job-relevant');
 
   // Thread detail states
   const [selectedThreadSummary, setSelectedThreadSummary] = useState<MailThreadSummary | null>(
@@ -140,6 +147,7 @@ export function InboxPage(): React.JSX.Element {
           requestId,
           provider: selectedAccount.provider,
           accountEmail: selectedAccount.accountEmail,
+          mailViewMode,
           ...(query ? { query } : {}),
           limit: 20,
           ...(cursor ? { cursor } : {}),
@@ -159,7 +167,7 @@ export function InboxPage(): React.JSX.Element {
         }
       }
     },
-    [selectedAccount, searchQuery],
+    [selectedAccount, searchQuery, mailViewMode],
   );
 
   // Trigger load when account changes or search changes, with request abort cleanup
@@ -180,7 +188,7 @@ export function InboxPage(): React.JSX.Element {
         activeDetailRequestIdRef.current = null;
       }
     };
-  }, [selectedAccount, searchQuery, loadThreads]);
+  }, [selectedAccount, searchQuery, mailViewMode, loadThreads]);
 
   // Select thread and load detail
   const selectThread = useCallback(
@@ -406,6 +414,31 @@ export function InboxPage(): React.JSX.Element {
                 onChange={setSearchQuery}
               />
             </div>
+            <fieldset className="inbox-view-mode" aria-label="Mail view">
+              <div className="inbox-view-mode__caption">
+                {mailViewMode === 'all'
+                  ? 'Showing all mail (unfiltered)'
+                  : 'Showing job-relevant mail'}
+              </div>
+              <div className="inbox-view-mode__toggle">
+                <button
+                  type="button"
+                  aria-pressed={mailViewMode === 'job-relevant'}
+                  title="Show job applications, recruiter, interview, offer, scheduling, and hiring conversations"
+                  onClick={() => setMailViewMode('job-relevant')}
+                >
+                  Job relevant
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={mailViewMode === 'all'}
+                  title="Show every message in the mailbox, unfiltered"
+                  onClick={() => setMailViewMode('all')}
+                >
+                  All mail
+                </button>
+              </div>
+            </fieldset>
           </div>
 
           <div className="inbox-thread-list">

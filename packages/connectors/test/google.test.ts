@@ -1,7 +1,12 @@
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ConnectorError, GoogleConnector, utf8Base64Url } from '../src/index.js';
+import {
+  ConnectorError,
+  GoogleConnector,
+  JOB_RELEVANT_GMAIL_QUERY,
+  utf8Base64Url,
+} from '../src/index.js';
 import { approvedSafety, ledger, message, noSleep, now, sendContext } from './helpers.js';
 
 const server = setupServer();
@@ -488,12 +493,14 @@ describe('Google Gmail and Calendar connector', () => {
       retryable: false,
     });
   });
-  it('lists mailbox threads with metadata-only rows, bounded pagination, and query support', async () => {
+  it('lists mailbox threads with metadata-only rows, bounded pagination, and safe query composition', async () => {
     server.use(
       http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads', ({ request }) => {
         const url = new URL(request.url);
         expect(url.searchParams.get('maxResults')).toBe('10');
-        expect(url.searchParams.get('q')).toBe('application');
+        // Default view mode is job-relevant: the fixed relevance query is
+        // ANDed with the user's escaped search tokens.
+        expect(url.searchParams.get('q')).toBe(`${JOB_RELEVANT_GMAIL_QUERY} "application"`);
         return HttpResponse.json({
           threads: [{ id: 'thread-101' }],
           nextPageToken: 'page-2',
@@ -558,6 +565,75 @@ describe('Google Gmail and Calendar connector', () => {
       ],
       nextPageToken: 'page-2',
     });
+  });
+
+  it('defaults to job-relevant Gmail filtering and composes user search without query injection', async () => {
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads', ({ request }) => {
+        const url = new URL(request.url);
+        // User text is tokenized and quoted so Gmail operators cannot change
+        // the shape of the composed query.
+        expect(url.searchParams.get('q')).toBe(
+          `${JOB_RELEVANT_GMAIL_QUERY} "in:trash" "from:x" "OR"`,
+        );
+        return HttpResponse.json({ threads: [], nextPageToken: 'page-2' });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'user@example.com',
+      query: 'in:trash from:x OR',
+      pageSize: 10,
+    });
+
+    expect(result).toEqual({ threads: [], nextPageToken: 'page-2' });
+  });
+
+  it('all mail mode lists the raw mailbox unfiltered with safe search composition', async () => {
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('q')).toBe('"application"');
+        return HttpResponse.json({ threads: [] });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'user@example.com',
+      mailViewMode: 'all',
+      query: 'application',
+      pageSize: 10,
+    });
+
+    expect(result.threads).toEqual([]);
+  });
+
+  it('all mail mode without a search query sends no Gmail filter', async () => {
+    server.use(
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('q')).toBeNull();
+        return HttpResponse.json({ threads: [] });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'user@example.com',
+      mailViewMode: 'all',
+      pageSize: 10,
+    });
+
+    expect(result.threads).toEqual([]);
+  });
+
+  it('rejects invalid mail view modes for Gmail thread listing', async () => {
+    await expect(
+      client().listMailboxThreads({
+        accountEmail: 'user@example.com',
+        mailViewMode: 'promotions' as never,
+        pageSize: 10,
+      }),
+    ).rejects.toThrow('Mail view mode must be job-relevant or all');
   });
 
   it('gets mailbox thread with recursive MIME decoding, attachment bodies, plain/HTML, pre/table/quoted, and cancellation', async () => {
