@@ -1,6 +1,6 @@
 # Outreachr release checklist
 
-The zero-cost release path is intentionally complete: all six native packages must pass tests, installed-package smoke checks, resource validation, hardened Electron-fuse verification, SHA-256 manifests, SBOM generation, and GitHub OIDC build attestations. Apple Developer ID/notarization and Windows Authenticode credentials are optional trust upgrades. When either credential group is absent, the corresponding files and machine-readable status are prominently labeled **UNSIGNED** (and **UNNOTARIZED** on macOS). The macOS baseline uses only a free ad-hoc signature so the arm64 app and agent executables can run; it provides no publisher identity or Gatekeeper trust. A partial credential group always fails the release.
+The zero-cost release path is intentionally complete: all six native packages must pass tests, installed-package smoke checks, resource validation, hardened Electron-fuse verification, SHA-256 manifests, SBOM generation, and GitHub OIDC build attestations. For hosted v0.2.0 releases, Apple Developer ID signing and notarization are mandatory for both hosted macOS architectures (x64 and arm64). Windows Authenticode credentials remain an optional trust upgrade. When Windows signing credentials are absent, the corresponding files and machine-readable status are prominently labeled **UNSIGNED**. A partial credential group or missing macOS Developer ID credential group always fails the release.
 
 ## One-time repository setup
 
@@ -14,11 +14,11 @@ The zero-cost release path is intentionally complete: all six native packages mu
 - [ ] Read back the environment, deployment policy, rulesets, and immutable-release setting through the GitHub API before creating any release tag.
 - [ ] Confirm all six GitHub-hosted runner labels are enabled for the repository.
 
-## Optional platform-signing upgrades
+## Platform signing and credential configuration
 
-No paid credential is required to build or publish a verified Outreachr release. A complete group automatically upgrades that platform’s artifacts; an absent group selects the disclosed unsigned path.
+Hosted macOS releases strictly require complete Developer ID signing and notarization credential groups for both hosted macOS architectures (`macos-x64` and `macos-arm64`). Windows Authenticode signing remains an optional trust upgrade: a complete group upgrades Windows artifacts, while an absent group selects the disclosed unsigned path.
 
-Optional macOS Developer ID and notarization secrets:
+Mandatory hosted macOS Developer ID and notarization secrets:
 
 - `OUTREACHR_MAC_CERTIFICATE_BASE64` — base64-encoded `.p12` Developer ID certificate.
 - `OUTREACHR_MAC_CERTIFICATE_PASSWORD`.
@@ -43,7 +43,7 @@ Optional Linux detached-signature secrets:
 - `OUTREACHR_LINUX_GPG_PRIVATE_KEY` — ASCII-armored private key.
 - `OUTREACHR_LINUX_GPG_PASSPHRASE`.
 
-Do not configure only part of a group. The optional policy rejects a partial macOS certificate/notary group or partial Windows group instead of silently downgrading it.
+Do not configure only part of a group. The release policy enforces mandatory Developer ID signing and notarization for both hosted macOS architectures, failing if macOS credentials are absent or partial. Windows Authenticode credentials remain optional; an absent Windows group selects the disclosed unsigned path, while a partial Windows group fails.
 
 ### Local macOS Keychain alternative
 
@@ -84,10 +84,10 @@ For a signed/notarized native-architecture build on a maintainer Mac, the local 
   - Windows arm64 on `windows-11-arm`
   - Linux x64 on `ubuntu-24.04`
   - Linux arm64 on `ubuntu-24.04-arm`
-- [ ] For a configured macOS upgrade, confirm Developer ID, Gatekeeper, notarization, and stapling passed. Otherwise confirm the app has only an ad-hoc signature, filenames contain `UNSIGNED-UNNOTARIZED`, and Gatekeeper rejection was expected and recorded.
+- [ ] For hosted macOS artifacts (`macos-x64` and `macos-arm64`), confirm Developer ID signing, Gatekeeper assessment, notarization tickets, and stapling all passed.
 - [ ] For a configured Windows upgrade, confirm the expected publisher and timestamped Authenticode signatures passed. Otherwise confirm filenames contain `UNSIGNED` and SmartScreen disclosure is present.
 - [ ] Confirm all six hardened Electron V1 fuses passed: RunAsNode, NODE_OPTIONS, and inspector arguments disabled; cookie encryption, embedded-ASAR integrity, and ASAR-only loading enabled.
-- [ ] Confirm each package launched from every final installer/archive and that the unpacked package contained the seed, notices, and working Claude and Codex executables with matching normalized hashes.
+- [ ] Confirm each package launched from every final installer/archive and that the unpacked package contained legal notices, working Claude and Codex executables with matching normalized hashes, and explicitly verify that `Outreachr_Investor_Seed.sqlite` is absent from generated and packaged resources.
 - [ ] Confirm every bundle includes `SIGNING-STATUS-<target>.json`, installers, SHA-256 manifests, legal notices, CycloneDX SBOMs, local provenance statements, and GitHub OIDC attestations.
 - [ ] Confirm the workflow created a private draft, downloaded every asset, compared it byte-for-byte, made the release public, proved GitHub marked it immutable, and downloaded and compared every immutable public asset again.
 - [ ] Download public assets on clean machines, verify checksums and attestations, install, create a test vault, restart, and uninstall without removing unrelated user data.
