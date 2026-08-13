@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { getResponse, HttpResponse, http, type RequestHandler } from 'msw';
+import { GoogleNetworkAuditor, startGoogleNetworkAudit } from './support/google-network-audit';
 
 export interface GoogleProviderMockState {
   readonly baseUrl: string;
@@ -12,6 +13,7 @@ export interface GoogleProviderMockState {
   readonly authorizationHeaders: Array<string | null>;
   readonly sentRawMessages: string[];
   readonly calendarCreateBodies: Array<Record<string, unknown>>;
+  readonly auditor: GoogleNetworkAuditor;
   gmailSendCalls: number;
   calendarCreateCalls: number;
 }
@@ -528,10 +530,11 @@ async function requestFromNode(request: IncomingMessage, baseUrl: string): Promi
   });
 }
 
-export async function startGoogleProviderMock(): Promise<GoogleProviderMock> {
+export async function startGoogleProviderMock(options?: { throwOnMutation?: boolean }): Promise<GoogleProviderMock> {
   const sockets = new Set<Socket>();
   let baseUrl = '';
   let handlers: RequestHandler[] = [];
+  const auditor = startGoogleNetworkAudit({ throwOnMutation: options?.throwOnMutation ?? false });
   const state: GoogleProviderMockState = {
     get baseUrl() {
       return baseUrl;
@@ -544,6 +547,7 @@ export async function startGoogleProviderMock(): Promise<GoogleProviderMock> {
     authorizationHeaders: [],
     sentRawMessages: [],
     calendarCreateBodies: [],
+    auditor,
     gmailSendCalls: 0,
     calendarCreateCalls: 0,
   };
@@ -551,6 +555,7 @@ export async function startGoogleProviderMock(): Promise<GoogleProviderMock> {
     void (async () => {
       const request = await requestFromNode(incoming, baseUrl);
       state.requests.push(`${request.method} ${new URL(request.url).pathname}`);
+      auditor.recordRequest({ method: request.method ?? 'GET', url: request.url, headers: request.headers });
       const response = await getResponse(handlers, request);
       if (!response) {
         outgoing.writeHead(500, { 'content-type': 'application/json' });

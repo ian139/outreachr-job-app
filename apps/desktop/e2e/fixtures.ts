@@ -313,6 +313,7 @@ export async function captureResponsiveScreenshot(
 }
 
 export function assertZeroLiveSends(googleProviderMockState: GoogleProviderMockState): void {
+  googleProviderMockState.auditor.assertZeroMutations();
   expect(
     googleProviderMockState.sentRawMessages.length,
     'Mock state recorded live send calls without founder approval',
