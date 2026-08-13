@@ -286,7 +286,17 @@ try {
     mac: 'unsigned',
     windows: 'unsigned',
     overall: 'mixed-or-unsigned',
+    notaryMode: 'none',
+    secretMode: 'none',
   });
+  assert.throws(
+    () => assessReleaseSecrets({}),
+    /macOS signing certificate group is required by the selected policy/,
+  );
+  assert.throws(
+    () => assessReleaseSecrets({}, 'mac-required'),
+    /macOS signing certificate group is required by the selected policy/,
+  );
   assert.throws(
     () => assessReleaseSecrets({ OUTREACHR_MAC_CERTIFICATE_BASE64: 'partial' }, 'optional'),
     /partially configured|partial/,
@@ -307,7 +317,49 @@ try {
     mac: 'signed',
     windows: 'signed',
     overall: 'fully-signed',
+    notaryMode: 'api_key',
+    secretMode: 'portable',
   });
+  const appleIdReleaseSecrets = {
+    OUTREACHR_MAC_CERTIFICATE_BASE64: 'certificate',
+    OUTREACHR_MAC_CERTIFICATE_PASSWORD: 'password',
+    OUTREACHR_MAC_EXPECTED_TEAM_ID: 'TEAM',
+    OUTREACHR_APPLE_ID: 'maintainer@example.com',
+    OUTREACHR_APPLE_APP_SPECIFIC_PASSWORD: 'secret-password',
+    OUTREACHR_APPLE_TEAM_ID: 'TEAM',
+  };
+  assert.deepEqual(assessReleaseSecrets(appleIdReleaseSecrets, 'mac-required'), {
+    policy: 'mac-required',
+    mac: 'signed',
+    windows: 'unsigned',
+    overall: 'mac-signed',
+    notaryMode: 'apple_id',
+    secretMode: 'portable',
+  });
+  assert.throws(
+    () =>
+      assessReleaseSecrets(
+        {
+          ...completeReleaseSecrets,
+          OUTREACHR_APPLE_ID: 'maintainer@example.com',
+          OUTREACHR_APPLE_APP_SPECIFIC_PASSWORD: 'secret-password',
+          OUTREACHR_APPLE_TEAM_ID: 'TEAM',
+        },
+        'optional',
+      ),
+    /mutually exclusive/,
+  );
+  assert.throws(
+    () =>
+      assessReleaseSecrets(
+        {
+          ...completeReleaseSecrets,
+          OUTREACHR_MAC_KEYCHAIN_IDENTITY: 'Developer ID',
+        },
+        'optional',
+      ),
+    /mutually exclusive/,
+  );
   assert.equal(
     signingStatus({
       target: 'macos-arm64',

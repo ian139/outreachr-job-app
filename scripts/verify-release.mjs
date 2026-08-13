@@ -20,6 +20,32 @@ if (desktopManifest.version !== manifest.version) {
     `Desktop version ${desktopManifest.version} does not match root release version ${manifest.version}`,
   );
 }
+const packagePaths = [
+  'packages/agents/package.json',
+  'packages/connectors/package.json',
+  'packages/core/package.json',
+  'packages/mcp/package.json',
+];
+for (const subpath of packagePaths) {
+  const subManifest = await readJson(path.join(repoRoot, subpath));
+  if (subManifest.version !== manifest.version) {
+    throw new Error(
+      `${subpath} version ${subManifest.version} does not match root release version ${manifest.version}`,
+    );
+  }
+}
+
+const EXPECTED_TARGETS = [
+  'macos-x64',
+  'macos-arm64',
+  'windows-x64',
+  'windows-arm64',
+  'linux-x64',
+  'linux-arm64',
+];
+if (EXPECTED_TARGETS.length !== 6) {
+  throw new Error('Release matrix must define exactly six native targets');
+}
 const objectType = await run('git', ['cat-file', '-t', tag]);
 if (objectType.stdout.trim() !== 'tag')
   throw new Error(`${tag} is a lightweight tag; releases require an annotated tag`);
@@ -46,8 +72,8 @@ for (const relative of requiredFiles) {
     throw new Error(`Release prerequisite is missing or empty: ${relative}`);
 }
 console.log(
-  `${tag} matches both application versions, points to protected main, and is annotated (${containsSignature ? 'tag signature present' : 'unsigned tag accepted by explicit policy'}).`,
+  `${tag} matches root, desktop, and workspace package versions (${manifest.version}), points to protected main, and is annotated (${containsSignature ? 'tag signature present' : 'unsigned tag accepted by explicit policy'}).`,
 );
 console.log(
-  'GitHub cryptographic tag verification is enforced separately through the GitHub API release preflight.',
+  'GitHub cryptographic tag verification and six-target asset matrix verification are enforced separately through release preflight and bundle checks.',
 );

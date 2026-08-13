@@ -7,6 +7,7 @@ import {
   preflightLocalDeveloperId,
 } from './apple-signing.mjs';
 import { materializeSigningAssets } from './materialize-signing-assets.mjs';
+import { assessReleaseSecrets } from './validate-release-secrets.mjs';
 import { parseArgs, repoRoot, run, runPnpm, targetId, walkFiles } from './_lib.mjs';
 
 if (!['darwin', 'win32'].includes(process.platform)) {
@@ -32,19 +33,22 @@ let localIdentity;
 if (signingSource === 'local-keychain') {
   const configuration = localKeychainSigningConfiguration(process.env);
   localIdentity = await preflightLocalDeveloperId(configuration);
+} else {
+  assessReleaseSecrets(process.env, process.platform === 'darwin' ? 'mac-required' : 'required');
 }
-await fs.rm(path.join(repoRoot, 'apps', 'desktop', 'release'), {
-  recursive: true,
-  force: true,
-});
-await runPnpm(['prepare:resources'], { cwd: repoRoot, capture: false });
-await runPnpm(['--filter', '@outreachr/desktop...', 'build'], {
-  cwd: repoRoot,
-  capture: false,
-});
 
 const assets = await materializeSigningAssets({ source: signingSource });
 try {
+  await fs.rm(path.join(repoRoot, 'apps', 'desktop', 'release'), {
+    recursive: true,
+    force: true,
+  });
+  await runPnpm(['prepare:resources'], { cwd: repoRoot, capture: false });
+  await runPnpm(['--filter', '@outreachr/desktop...', 'build'], {
+    cwd: repoRoot,
+    capture: false,
+  });
+
   if (localIdentity) assets.environment.CSC_NAME = localIdentity.fingerprint;
   const platformFlag = process.platform === 'darwin' ? '--mac' : '--win';
   const platformTargets = process.platform === 'darwin' ? ['dmg', 'zip'] : ['nsis'];

@@ -161,9 +161,9 @@ jobs:
       - name: Verify tag, version, and release files
         run: node scripts/verify-release.mjs --allow-unverified-tag
 
-      - name: Assess optional signing and notarization upgrades
+      - name: Require macOS Developer ID signing and notarization credentials
         id: signing-readiness
-        run: node scripts/validate-release-secrets.mjs --policy optional
+        run: node scripts/validate-release-secrets.mjs --policy mac-required
         env:
           OUTREACHR_MAC_CERTIFICATE_BASE64: ${{ secrets.OUTREACHR_MAC_CERTIFICATE_BASE64 }}
           OUTREACHR_MAC_CERTIFICATE_PASSWORD: ${{ secrets.OUTREACHR_MAC_CERTIFICATE_PASSWORD }}
@@ -274,9 +274,11 @@ jobs:
           OUTREACHR_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.OUTREACHR_APPLE_APP_SPECIFIC_PASSWORD }}
           OUTREACHR_APPLE_TEAM_ID: ${{ secrets.OUTREACHR_APPLE_TEAM_ID }}
 
-      - name: Build explicitly unsigned and unnotarized macOS package
-        if: runner.os == 'macOS' && needs.release-preflight.outputs.mac_signing == 'unsigned'
-        run: node scripts/package-target.mjs --unsigned --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - name: Fail closed if macOS signing preflight output is unsigned
+        if: runner.os == 'macOS' && needs.release-preflight.outputs.mac_signing != 'signed'
+        run: |
+          echo "ERROR: Hosted v0.2.0 macOS release requires Developer ID signing and notarization; mac_signing is '${{ needs.release-preflight.outputs.mac_signing }}'"
+          exit 1
 
       - name: Build signed Windows release package
         if: runner.os == 'Windows' && needs.release-preflight.outputs.windows_signing == 'signed'
@@ -311,9 +313,11 @@ jobs:
         env:
           OUTREACHR_WINDOWS_EXPECTED_PUBLISHER: ${{ secrets.OUTREACHR_WINDOWS_EXPECTED_PUBLISHER }}
 
-      - name: Verify explicit unsigned and unnotarized macOS status
-        if: runner.os == 'macOS' && needs.release-preflight.outputs.mac_signing == 'unsigned'
-        run: node scripts/verify-code-signing.mjs --expect unsigned --release-dir apps/desktop/release
+      - name: Fail closed if macOS verification observes unsigned status
+        if: runner.os == 'macOS' && needs.release-preflight.outputs.mac_signing != 'signed'
+        run: |
+          echo "ERROR: Unsigned macOS release artifacts are forbidden for hosted v0.2.0 release"
+          exit 1
 
       - name: Verify explicit unsigned Windows status
         if: runner.os == 'Windows' && needs.release-preflight.outputs.windows_signing == 'unsigned'
