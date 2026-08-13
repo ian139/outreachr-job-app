@@ -129,6 +129,7 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
   const { data, command, notify } = useWorkspace();
   const existing = data?.connectors.find((item) => item.provider === provider);
   const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [tenantId, setTenantId] = useState('common');
   const [scopeProfile, setScopeProfile] = useState<ScopeProfile>('minimum');
   const [reconnecting, setReconnecting] = useState(false);
@@ -144,6 +145,9 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
       await command('connector.configure', {
         provider,
         clientId,
+        ...(provider === 'google' && clientSecret.trim()
+          ? { clientSecret: clientSecret.trim() }
+          : {}),
         ...(provider === 'microsoft' ? { tenantId } : {}),
         scopeProfile,
       });
@@ -222,7 +226,8 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
         <strong>{existing.error}</strong>
         <p>
           Review the registered client type, callback, account access, and requested scopes below,
-          then reconnect. Outreachr never asks for an account password or client secret.
+          then reconnect. Outreachr never asks for an account password; a Google client secret is
+          optional and stays encrypted on this device.
         </p>
       </div>
     </div>
@@ -362,9 +367,10 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
                 <div>
                   <strong>Create a Desktop app OAuth client</strong>
                   <p>
-                    Choose Desktop app and copy only its client ID. Outreachr uses the system
-                    browser, PKCE, and a temporary 127.0.0.1 loopback callback. Do not paste a
-                    client secret.
+                    Choose Desktop app and copy its client ID. Outreachr uses the system browser,
+                    PKCE, and a temporary 127.0.0.1 loopback callback. A public desktop client needs
+                    no secret; if you created a confidential client, you may paste its secret in the
+                    field below and it is encrypted locally.
                   </p>
                   <ExternalLinkButton href={officialLinks.googleClients}>
                     OAuth clients
@@ -442,10 +448,26 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
           value={clientId}
           onChange={(event) => setClientId(event.target.value)}
           placeholder="Paste the provider-issued client ID"
-          hint="This identifier is public configuration. Never paste a client secret or account password."
+          hint={
+            provider === 'google'
+              ? 'This identifier is public configuration. Never paste an account password.'
+              : 'This identifier is public configuration. Never paste a client secret or account password.'
+          }
           autoComplete="off"
           spellCheck={false}
         />
+        {provider === 'google' ? (
+          <TextField
+            type="password"
+            label="Client secret (optional)"
+            value={clientSecret}
+            onChange={(event) => setClientSecret(event.target.value)}
+            placeholder="Paste the client secret only for a confidential Google client"
+            hint="A desktop client is normally public and works without a secret. If you created a confidential Google OAuth client, its secret is encrypted with the operating-system credential facility and never leaves this device."
+            autoComplete="off"
+            spellCheck={false}
+          />
+        ) : null}
         {provider === 'microsoft' ? (
           <TextField
             label="Tenant"

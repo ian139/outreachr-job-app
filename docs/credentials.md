@@ -1,8 +1,8 @@
 # User-owned connector credentials
 
-Outreachr has no shared cloud OAuth application. Each user creates a public native-desktop client so the local app can request narrowly delegated access without any centrally controlled Outreachr credential. The Application/Client ID and Microsoft tenant are public configuration; an OAuth authorization code, access token, refresh token, client secret, or account password is not.
+Outreachr has no shared cloud OAuth application. Each user creates a public native-desktop client so the local app can request narrowly delegated access without any centrally controlled Outreachr credential. The Application/Client ID and Microsoft tenant are public configuration; an OAuth authorization code, access token, refresh token, or account password is not. A Google client secret is optional and only ever stored encrypted outside the renderer.
 
-Never paste a client secret or account password into Outreachr. The app has no field for either one. Authorization runs in the system browser with PKCE, and token exchange and storage stay in the Electron main process.
+Never paste an account password into Outreachr. A public desktop client needs no client secret; if you created a confidential Google OAuth client, you may paste its client secret into the optional password field, and it is encrypted with the operating-system credential facility and never returned to the renderer. Authorization runs in the system browser with PKCE, and token exchange and storage stay in the Electron main process.
 
 ## Google Workspace
 
@@ -13,8 +13,8 @@ Never paste a client secret or account password into Outreachr. The app has no f
    - under [Audience](https://console.cloud.google.com/auth/audience), choose Internal only for an eligible Google Workspace organization or External for a personal/outside account;
    - when an External app remains in Testing, add the exact user Google account as a test user;
    - under [Data Access](https://console.cloud.google.com/auth/scopes), declare the scopes listed below.
-4. Open [Google Auth Platform clients](https://console.cloud.google.com/auth/clients), create an OAuth client, and select **Desktop app**. Copy only the client ID. Google documents this client type in [Create access credentials](https://developers.google.com/workspace/guides/create-credentials#desktop-app) and the [native-app loopback flow](https://developers.google.com/identity/protocols/oauth2/native-app).
-5. In Outreachr, open **Settings → Mail & calendar → Google Workspace**, paste the client ID, choose whether to enable relationship sync, and select **Save and connect in browser**.
+4. Open [Google Auth Platform clients](https://console.cloud.google.com/auth/clients), create an OAuth client, and select **Desktop app**. Copy the client ID. A public desktop client needs no secret; if you created a confidential client, paste its secret into Outreachr's optional Client secret field. Google documents this client type in [Create access credentials](https://developers.google.com/workspace/guides/create-credentials#desktop-app) and the [native-app loopback flow](https://developers.google.com/identity/protocols/oauth2/native-app).
+5. In Outreachr, open **Settings → Mail & calendar → Google Workspace**, paste the client ID, optionally paste the client secret for a confidential client, choose whether to enable relationship sync, and select **Save and connect in browser**.
 6. In the system browser, select the same Google account, review every requested permission, authorize it, and return to Outreachr. The local callback closes automatically after the response.
 7. Select **Test connection**, then **Sync calendar**. If relationship sync is enabled, select **Sync mail history** and let the initial exhaustive reconciliation finish before approving or sending outreach.
 
@@ -44,7 +44,7 @@ Google classifies some Gmail access as sensitive or restricted. A user-owned, pe
 
 ## Credential storage and renderer boundary
 
-The public client ID, tenant selection, requested scope list, connection status, and connected account label can appear in the renderer and SQLite. OAuth codes and tokens do not. The main process receives the loopback callback, exchanges the one-time code, and encrypts access and refresh tokens with the operating-system credential facility before ciphertext is stored in SQLite:
+The public client ID, tenant selection, requested scope list, connection status, and connected account label can appear in the renderer and SQLite. OAuth codes and tokens do not. An optional Google client secret also never appears in the renderer or public configuration; it is stored only as encrypted ciphertext under its own secure-store key. The main process receives the loopback callback, exchanges the one-time code, and encrypts access and refresh tokens with the operating-system credential facility before ciphertext is stored in SQLite:
 
 - macOS Keychain;
 - Windows DPAPI/Credential protection;

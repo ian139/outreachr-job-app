@@ -4,7 +4,7 @@ Provider-neutral email, calendar, and OAuth primitives for Outreachr. The packag
 
 ## Security and delivery contract
 
-- OAuth uses Authorization Code + PKCE (`S256`) and a loopback redirect. A desktop/public client must never have a client secret.
+- OAuth uses Authorization Code + PKCE (`S256`) and a loopback redirect. Desktop/public clients authenticate with PKCE and never send `client_secret`; a Google OAuth client explicitly created as confidential may supply an optional `clientSecret`, which the helpers send only to Google's token endpoint. Microsoft always exchanges as a public client.
 - The application injects `fetch`, an access-token callback, and a `SendAttemptLedger`. Production must implement the ledger in SQLite with a unique `operation_key` and an atomic insert.
 - Sending fails closed unless the founder approved the exact message fingerprint and a duplicate check covered every recipient identity.
 - If a recipient was contacted before, the connector blocks the send. There is deliberately no bypass flag in this package.
@@ -76,7 +76,7 @@ Each founder supplies their own Google Desktop OAuth client:
 2. In the [API Library](https://console.cloud.google.com/apis/library), enable **Gmail API** and **Google Calendar API**.
 3. Configure the [OAuth consent screen](https://console.cloud.google.com/auth/overview). For a personal/testing client, add the founder's Google account as a test user. Google documents the process in [Configure OAuth consent](https://developers.google.com/workspace/guides/configure-oauth-consent).
 4. In [Google Auth Platform clients](https://console.cloud.google.com/auth/clients), create an OAuth client of type **Desktop app**. Google has a matching [desktop credential guide](https://developers.google.com/workspace/guides/create-credentials#desktop-app).
-5. Copy only the public desktop **Client ID** into Outreachr. Do not paste or import a client secret; this package never sends `client_secret`.
+5. Copy the public desktop **Client ID** into Outreachr. A Desktop-app client is public and normally needs no secret; if you created a confidential client, paste its secret into Outreachr's optional Client secret field. The helpers send `client_secret` only for Google and only when the application supplies one.
 6. Outreachr opens the system browser, binds a temporary `127.0.0.1` port, and supplies the same loopback callback to `prepareDesktopAuthorization` and `exchangeAuthorizationCode`. See Google's [OAuth for installed apps](https://developers.google.com/identity/protocols/oauth2/native-app).
 
 The `minimum` Google scope profile contains:

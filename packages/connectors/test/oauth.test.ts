@@ -167,6 +167,53 @@ describe('desktop OAuth and PKCE', () => {
       expect(body.has('client_secret')).toBe(false);
     }
   });
+  it('includes a configured Google client secret in authorization-code exchange', async () => {
+    server.use(
+      http.post(tokenEndpoint('google'), async ({ request }) => {
+        const body = new URLSearchParams(await request.text());
+        expect(body.get('client_id')).toBe('google-client');
+        expect(body.get('client_secret')).toBe('google-secret-for-test');
+        expect(body.get('grant_type')).toBe('authorization_code');
+        return HttpResponse.json({ access_token: 'google-access', token_type: 'Bearer' });
+      }),
+    );
+
+    const pkce = await createPkcePair();
+    await expect(
+      exchangeAuthorizationCode({
+        provider: 'google',
+        fetch,
+        clientId: 'google-client',
+        clientSecret: 'google-secret-for-test',
+        code: 'google-code',
+        codeVerifier: pkce.verifier,
+        redirectUri: 'http://127.0.0.1:49152/oauth/callback',
+      }),
+    ).resolves.toMatchObject({ accessToken: 'google-access' });
+  });
+
+  it('includes a configured Google client secret in refresh-token exchange', async () => {
+    server.use(
+      http.post(tokenEndpoint('google'), async ({ request }) => {
+        const body = new URLSearchParams(await request.text());
+        expect(body.get('client_id')).toBe('google-client');
+        expect(body.get('client_secret')).toBe('google-secret-for-test');
+        expect(body.get('grant_type')).toBe('refresh_token');
+        return HttpResponse.json({ access_token: 'google-refreshed', token_type: 'Bearer' });
+      }),
+    );
+
+    await expect(
+      refreshAccessToken({
+        provider: 'google',
+        fetch,
+        clientId: 'google-client',
+        clientSecret: 'google-secret-for-test',
+        refreshToken: 'google-refresh',
+      }),
+    ).resolves.toMatchObject({ accessToken: 'google-refreshed' });
+  });
+
 
   it('refreshes tokens and maps OAuth endpoint errors', async () => {
     server.use(

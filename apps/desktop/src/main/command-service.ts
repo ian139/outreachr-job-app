@@ -245,6 +245,7 @@ const commandSchemas: Record<keyof CommandMap, z.ZodType> = {
     provider,
     clientId: z.string().trim().min(1).max(1_000),
     tenantId: z.string().trim().max(500).optional(),
+    clientSecret: z.string().trim().max(2_000).optional(),
     scopeProfile: z.enum(['read-only', 'minimum', 'relationship-sync']),
   }),
   'connector.connect': z.object({ provider }),

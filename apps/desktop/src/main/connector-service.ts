@@ -84,6 +84,15 @@ function secretKey(provider: ConnectorProvider): string {
   return `oauth/${provider}/tokens`;
 }
 
+function googleClientSecretKey(): string {
+  return 'oauth/google/client-secret';
+}
+
+function redactGoogleClientSecret(message: string, secret: string | undefined): string {
+  if (!secret) return message;
+  return message.split(secret).join('[redacted]');
+}
+
 function connectorId(provider: ConnectorProvider): string {
   return `connector:${provider}`;
 }
@@ -524,9 +533,23 @@ export class ConnectorService {
     clientId: string;
     tenantId?: string;
     scopeProfile: ScopeProfile;
+    /** Optional Google confidential-client secret; stored only in the encrypted secure store. */
+    clientSecret?: string;
   }): Promise<ConnectorStatus> {
     const now = this.#now().toISOString();
     const scopes = getScopes(input.provider, input.scopeProfile);
+    const clientSecret = input.clientSecret?.trim() || undefined;
+    if (input.provider === 'google') {
+      if (clientSecret) {
+        const encryption = await this.#secureStore.status();
+        if (!encryption.available)
+          throw new Error(encryption.reason ?? 'Credential encryption is unavailable');
+        await this.#secureStore.set(googleClientSecretKey(), { clientSecret });
+        await this.#vault.persist();
+      } else {
+        this.#secureStore.delete(googleClientSecretKey());
+      }
+    }
     this.#vault.repository.upsertConnectorConfig({
       id: connectorId(input.provider),
       provider: input.provider,
@@ -555,6 +578,7 @@ export class ConnectorService {
     const encryption = await this.#secureStore.status();
     if (!encryption.available)
       throw new Error(encryption.reason ?? 'Credential encryption is unavailable');
+    const googleClientSecret = provider === 'google' ? await this.#googleClientSecret() : undefined;
     try {
       const { callbackUrl, prepared } = await loopbackCallback(
         provider,
@@ -569,6 +593,7 @@ export class ConnectorService {
         provider,
         fetch: this.#fetch,
         clientId: config.publicConfig.clientId,
+        ...(googleClientSecret ? { clientSecret: googleClientSecret } : {}),
         code: callback.code,
         codeVerifier: prepared.pkce.verifier,
         redirectUri: prepared.redirectUri,
@@ -595,10 +620,8 @@ export class ConnectorService {
       this.#errors.delete(provider);
       await this.#vault.persist();
     } catch (error) {
-      this.#errors.set(
-        provider,
-        error instanceof Error ? error.message : 'OAuth connection failed',
-      );
+      const message = error instanceof Error ? error.message : 'OAuth connection failed';
+      this.#errors.set(provider, redactGoogleClientSecret(message, googleClientSecret));
       throw error;
     }
     return (await this.statuses()).find((status) => status.provider === provider)!;
@@ -607,6 +630,7 @@ export class ConnectorService {
   async disconnect(provider: ConnectorProvider): Promise<ConnectorStatus> {
     const now = this.#now().toISOString();
     this.#secureStore.delete(secretKey(provider));
+    this.#secureStore.delete(googleClientSecretKey());
     this.#vault.vault.run(
       "UPDATE connector_configs SET status='disabled',updated_at=? WHERE id=?",
       [now, connectorId(provider)],
@@ -980,23 +1004,38 @@ export class ConnectorService {
       throw new Error(
         `${provider} access expired and no refresh token is available; reconnect the account`,
       );
-    const refreshed = await refreshAccessToken({
-      provider,
-      fetch: this.#fetch,
-      clientId: config.publicConfig.clientId,
-      refreshToken: tokens.refreshToken,
-      scopes: config.scopes,
-      ...(config.publicConfig.tenantId ? { tenant: config.publicConfig.tenantId } : {}),
-      now: this.#now,
-    });
-    const updated: StoredTokens = {
-      ...tokens,
-      ...refreshed,
-      refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-    };
-    await this.#secureStore.set(secretKey(provider), updated);
-    await this.#vault.persist();
-    return updated.accessToken;
+    const googleClientSecret = provider === 'google' ? await this.#googleClientSecret() : undefined;
+    try {
+      const refreshed = await refreshAccessToken({
+        provider,
+        fetch: this.#fetch,
+        clientId: config.publicConfig.clientId,
+        ...(googleClientSecret ? { clientSecret: googleClientSecret } : {}),
+        refreshToken: tokens.refreshToken,
+        scopes: config.scopes,
+        ...(config.publicConfig.tenantId ? { tenant: config.publicConfig.tenantId } : {}),
+        now: this.#now,
+      });
+      const updated: StoredTokens = {
+        ...tokens,
+        ...refreshed,
+        refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
+      };
+      await this.#secureStore.set(secretKey(provider), updated);
+      await this.#vault.persist();
+      return updated.accessToken;
+    } catch (error) {
+      if (error instanceof Error && googleClientSecret) {
+        error.message = redactGoogleClientSecret(error.message, googleClientSecret);
+      }
+      throw error;
+    }
+  }
+
+  async #googleClientSecret(): Promise<string | undefined> {
+    const stored = await this.#secureStore.get<{ clientSecret: string }>(googleClientSecretKey());
+    const secret = stored?.clientSecret?.trim();
+    return secret || undefined;
   }
 
   async sendApprovedDraft(id: string, expectedContentHash: string): Promise<DraftMessage> {

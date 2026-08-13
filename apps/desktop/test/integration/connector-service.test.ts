@@ -96,6 +96,60 @@ describe('ConnectorService with MSW provider boundaries', () => {
     );
   }
 
+  const TEST_GOOGLE_CLIENT_SECRET = 'google-confidential-secret-for-tests';
+
+  function googleHandlersWithSecret(options?: {
+    refresh?: (body: URLSearchParams) => void;
+    refreshToken?: string;
+  }): void {
+    const refreshedAccessToken = options?.refreshToken ?? 'google-refreshed';
+    server.use(
+      http.post(tokenEndpoint('google'), async ({ request }) => {
+        const body = new URLSearchParams(await request.text());
+        if (body.get('grant_type') === 'refresh_token') {
+          options?.refresh?.(body);
+          return HttpResponse.json({
+            access_token: refreshedAccessToken,
+            token_type: 'Bearer',
+            expires_in: 3_600,
+          });
+        }
+        expect(body.get('client_id')).toBe('founder-owned-desktop-client');
+        expect(body.get('grant_type')).toBe('authorization_code');
+        expect(body.get('code_verifier')).toMatch(/^[A-Za-z0-9_-]{43,128}$/u);
+        expect(body.get('client_secret')).toBe(TEST_GOOGLE_CLIENT_SECRET);
+        return HttpResponse.json({
+          access_token: 'google-access',
+          refresh_token: 'google-refresh',
+          token_type: 'Bearer',
+          expires_in: 3_600,
+        });
+      }),
+      http.get('https://openidconnect.googleapis.com/v1/userinfo', ({ request }) => {
+        const bearer = request.headers.get('authorization')?.replace(/^Bearer /u, '');
+        expect(['google-access', refreshedAccessToken]).toContain(bearer);
+        return HttpResponse.json({ email: 'founder@local.test' });
+      }),
+      http.get('https://gmail.googleapis.com/gmail/v1/users/me/messages', () =>
+        HttpResponse.json({ messages: [] }),
+      ),
+    );
+  }
+
+  function failingGoogleSecretHandlers(): void {
+    server.use(
+      http.post(tokenEndpoint('google'), async () =>
+        HttpResponse.json(
+          {
+            error: 'invalid_client',
+            error_description: `Client authentication failed for ${TEST_GOOGLE_CLIENT_SECRET}`,
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+  }
+
   function successfulMicrosoftHandlers(onSend?: (request: Request) => void): void {
     server.use(
       http.post(tokenEndpoint('microsoft'), async ({ request }) => {
@@ -130,8 +184,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     );
   }
 
-  it('uses PKCE without a secret, stores encrypted OAuth tokens, and reports connected state', async () => {
-    successfulGoogleHandlers();
+  it('uses PKCE without a secret, stores encrypted OAuth tokens, and reports connected state', async () => {    successfulGoogleHandlers();
     const { vault, connector, openExternal } = await fixture();
 
     const configured = await connector.configure({
@@ -198,6 +251,122 @@ describe('ConnectorService with MSW provider boundaries', () => {
     expect(disconnectAudit?.detail_json).toContain('google');
     expect(disconnectAudit?.detail_json).not.toContain('founder@local.test');
     expect(disconnectAudit?.detail_json).not.toContain('founder-owned-desktop-client');
+  });
+
+  it('sends the configured Google client secret on exchange, never persists it publicly, and removes it on disconnect', async () => {
+    googleHandlersWithSecret();
+    const { vault, secureStore, connector } = await fixture();
+
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      clientSecret: TEST_GOOGLE_CLIENT_SECRET,
+      scopeProfile: 'minimum',
+    });
+    const connected = await connector.connect('google');
+    expect(connected).toMatchObject({
+      provider: 'google',
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+    });
+    await expect(
+      secureStore.get<{ clientSecret: string }>('oauth/google/client-secret'),
+    ).resolves.toEqual({ clientSecret: TEST_GOOGLE_CLIENT_SECRET });
+
+    const config = vault.vault.one<{ public_config_json: string; secret_ref: string }>(
+      'SELECT public_config_json,secret_ref FROM connector_configs WHERE provider=?',
+      ['google'],
+    );
+    expect(config?.public_config_json).not.toContain(TEST_GOOGLE_CLIENT_SECRET);
+    expect(config?.secret_ref).toBe('secure-store://oauth/google/tokens');
+    expect(Buffer.from(vault.vault.export()).includes(Buffer.from(TEST_GOOGLE_CLIENT_SECRET))).toBe(
+      false,
+    );
+
+    await connector.disconnect('google');
+    await expect(
+      secureStore.get<{ clientSecret: string }>('oauth/google/client-secret'),
+    ).resolves.toBeNull();
+  });
+
+  it('replaces the stored Google client secret on reconfiguration', async () => {
+    const { secureStore, connector } = await fixture();
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      clientSecret: 'first-google-secret',
+      scopeProfile: 'minimum',
+    });
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      clientSecret: 'replacement-google-secret',
+      scopeProfile: 'minimum',
+    });
+    await expect(
+      secureStore.get<{ clientSecret: string }>('oauth/google/client-secret'),
+    ).resolves.toEqual({ clientSecret: 'replacement-google-secret' });
+
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      scopeProfile: 'minimum',
+    });
+    await expect(
+      secureStore.get<{ clientSecret: string }>('oauth/google/client-secret'),
+    ).resolves.toBeNull();
+  });
+
+  it('includes the configured Google client secret when refreshing an expired token', async () => {
+    let refreshedWithSecret = false;
+    googleHandlersWithSecret({
+      refresh: (body) => {
+        expect(body.get('client_id')).toBe('founder-owned-desktop-client');
+        expect(body.get('grant_type')).toBe('refresh_token');
+        expect(body.get('client_secret')).toBe(TEST_GOOGLE_CLIENT_SECRET);
+        refreshedWithSecret = true;
+      },
+      refreshToken: 'google-refreshed-access',
+    });
+    const { secureStore, connector } = await fixture();
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      clientSecret: TEST_GOOGLE_CLIENT_SECRET,
+      scopeProfile: 'minimum',
+    });
+    await connector.connect('google');
+    // Force the stored access token past its freshness window so the next
+    // read performs a refresh with the configured client secret.
+    const tokens = await secureStore.get<{
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: string;
+    }>('oauth/google/tokens');
+    await secureStore.set('oauth/google/tokens', {
+      ...tokens!,
+      expiresAt: '2026-07-31T00:00:00.000Z',
+    });
+
+    const status = await connector.test('google');
+    expect(status).toMatchObject({ provider: 'google', state: 'connected' });
+    expect(refreshedWithSecret).toBe(true);
+  });
+
+  it('redacts the Google client secret from connection failures surfaced to the renderer', async () => {
+    failingGoogleSecretHandlers();
+    const { connector } = await fixture();
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      clientSecret: TEST_GOOGLE_CLIENT_SECRET,
+      scopeProfile: 'minimum',
+    });
+
+    await expect(connector.connect('google')).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    const status = (await connector.statuses()).find((item) => item.provider === 'google')!;
+    expect(status.error).not.toContain(TEST_GOOGLE_CLIENT_SECRET);
+    expect(status.error).toContain('[redacted]');
   });
 
   it('grants exactly the Google read-only scopes and gates drafts, sends, and calendar', async () => {

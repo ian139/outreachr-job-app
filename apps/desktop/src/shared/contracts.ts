@@ -734,6 +734,8 @@ export interface CommandMap {
     provider: ConnectorProvider;
     clientId: string;
     tenantId?: string;
+    /** Optional Google confidential-client secret; sent only in this command payload. */
+    clientSecret?: string;
     scopeProfile: ScopeProfile;
   };
   'connector.connect': { provider: ConnectorProvider };

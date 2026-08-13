@@ -357,8 +357,9 @@ export function OnboardingFlow(): React.JSX.Element {
                   <Mail aria-hidden="true" />
                   <p>
                     To sync or send, open Settings → Mail & calendar. Create a founder-owned desktop
-                    OAuth client, follow the exact callback and scope instructions, and paste only
-                    its public client ID—never a client secret or account password.
+                    OAuth client, follow the exact callback and scope instructions, and paste its
+                    public client ID—never an account password. A Google client secret is optional
+                    and stays encrypted on this device.
                   </p>
                 </div>
                 <div className="ready-next">

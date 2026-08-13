@@ -578,6 +578,32 @@ describe('CommandService runtime boundary and workflows', () => {
     ).resolves.toMatchObject({ approvalState: 'approved' });
   });
 
+  it('routes the optional Google client secret only through connector.configure', async () => {
+    const { connectorMock, service } = await fixture();
+    await service.execute('onboarding.complete', onboarding);
+
+    await expect(
+      service.execute('connector.configure', {
+        provider: 'google',
+        clientId: '123456789.apps.googleusercontent.com',
+        clientSecret: 'google-confidential-secret',
+        scopeProfile: 'minimum',
+      }),
+    ).resolves.toMatchObject({ provider: 'google', state: 'not_configured' });
+    expect(connectorMock.configure).toHaveBeenCalledWith({
+      provider: 'google',
+      clientId: '123456789.apps.googleusercontent.com',
+      clientSecret: 'google-confidential-secret',
+      scopeProfile: 'minimum',
+    });
+    await expect(
+      service.execute('connector.connect', { provider: 'google' }),
+    ).resolves.toMatchObject({ state: 'connected' });
+    expect(connectorMock.connect).toHaveBeenCalledWith('google');
+    expect(connectorMock.configure.mock.calls[0]![0]).not.toHaveProperty('accessToken');
+    expect(connectorMock.configure.mock.calls[0]![0]).not.toHaveProperty('refreshToken');
+  });
+
   it('routes mailbox, policy, review, and suppression commands through validated boundaries', async () => {
     const { connectorMock, service, vault } = await fixture();
     await service.execute('onboarding.complete', onboarding);

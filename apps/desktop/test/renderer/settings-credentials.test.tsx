@@ -55,7 +55,7 @@ describe('credential setup guidance and renderer boundary', () => {
     );
   });
 
-  it('passes only public connector configuration through the renderer bridge', async () => {
+  it('passes only public connector configuration plus the optional Google secret through the renderer bridge', async () => {
     const fixture = bootstrapFixture();
     const configured: ConnectorStatus = {
       ...fixture.connectors[0]!,
@@ -96,12 +96,14 @@ describe('credential setup guidance and renderer boundary', () => {
     const google = section('Google Workspace');
     const clientId = within(google).getByPlaceholderText('Paste the provider-issued client ID');
     expect(clientId).toHaveAttribute('autocomplete', 'off');
-    expect(
-      within(google).queryByPlaceholderText(/client secret|password/u),
-    ).not.toBeInTheDocument();
-    expect(google.querySelector('input[type="password"]')).toBeNull();
+    const secretInput = within(google).getByLabelText('Client secret (optional)');
+    expect(secretInput).toHaveAttribute('type', 'password');
+    expect(secretInput).toHaveAttribute('autocomplete', 'off');
     fireEvent.change(clientId, {
       target: { value: '123456789.apps.googleusercontent.com' },
+    });
+    fireEvent.change(secretInput, {
+      target: { value: 'google-confidential-secret' },
     });
     fireEvent.click(within(google).getByRole('radio', { name: /Relationship sync/u }));
     fireEvent.click(within(google).getByRole('button', { name: 'Save and connect in browser' }));
@@ -110,6 +112,7 @@ describe('credential setup guidance and renderer boundary', () => {
       expect(command).toHaveBeenCalledWith('connector.configure', {
         provider: 'google',
         clientId: '123456789.apps.googleusercontent.com',
+        clientSecret: 'google-confidential-secret',
         scopeProfile: 'relationship-sync',
       }),
     );
@@ -117,11 +120,11 @@ describe('credential setup guidance and renderer boundary', () => {
       expect(command).toHaveBeenCalledWith('connector.connect', { provider: 'google' }),
     );
     for (const [, payload] of command.mock.calls) {
-      expect(payload).not.toHaveProperty('clientSecret');
       expect(payload).not.toHaveProperty('accessToken');
       expect(payload).not.toHaveProperty('refreshToken');
       expect(payload).not.toHaveProperty('authorizationCode');
     }
+    expect(connected).not.toHaveProperty('clientSecret');
   });
 
   it('shows read-only access as reviewable and gates send and calendar actions', async () => {

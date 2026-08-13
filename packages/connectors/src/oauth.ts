@@ -47,6 +47,13 @@ export interface ExchangeAuthorizationCodeInput {
   provider: ConnectorProvider;
   fetch: FetchLike;
   clientId: string;
+  /**
+   * Optional confidential-client secret. Desktop Google clients are public
+   * by default and must stay secretless; only a Google OAuth client that was
+   * explicitly created as confidential may supply one. Never supplied for
+   * Microsoft, which always uses PKCE as a public client.
+   */
+  clientSecret?: string;
   code: string;
   codeVerifier: string;
   redirectUri: string;
@@ -58,6 +65,8 @@ export interface RefreshAccessTokenInput {
   provider: ConnectorProvider;
   fetch: FetchLike;
   clientId: string;
+  /** Optional confidential-client secret; see {@link ExchangeAuthorizationCodeInput.clientSecret}. */
+  clientSecret?: string;
   refreshToken: string;
   scopes?: string[];
   tenant?: string;
@@ -288,6 +297,7 @@ export async function exchangeAuthorizationCode(
     redirect_uri: input.redirectUri,
     grant_type: 'authorization_code',
   });
+  if (input.provider === 'google' && input.clientSecret) body.set('client_secret', input.clientSecret);
   return postToken(
     input.provider,
     input.fetch,
@@ -304,6 +314,7 @@ export async function refreshAccessToken(input: RefreshAccessTokenInput): Promis
     refresh_token: input.refreshToken,
     grant_type: 'refresh_token',
   });
+  if (input.provider === 'google' && input.clientSecret) body.set('client_secret', input.clientSecret);
   if (input.scopes?.length) body.set('scope', input.scopes.join(' '));
   return postToken(
     input.provider,
