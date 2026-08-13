@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import net from 'node:net';
+import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -228,7 +228,7 @@ export async function smokeDistribution(distribution, timeout, deps = {}) {
       });
     });
 
-    const renderer2 = await Promise.race([
+    await Promise.race([
       (deps.waitForRendererReadiness ?? waitForRendererReadiness)(debuggingPort2, timeout, deps),
       earlyExit2,
     ]);
@@ -364,7 +364,11 @@ export async function driveJobApplicationPersistenceCheck(
   deps = {},
 ) {
   if (deps.driveJobApplicationPersistenceCheck) {
-    return await deps.driveJobApplicationPersistenceCheck(debuggingPort, expectedApplicationId, deps);
+    return await deps.driveJobApplicationPersistenceCheck(
+      debuggingPort,
+      expectedApplicationId,
+      deps,
+    );
   }
   const targets = await (deps.getDevToolsTargets ?? getDevToolsTargets)(debuggingPort, deps);
   const pageTarget = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
@@ -375,7 +379,7 @@ export async function driveJobApplicationPersistenceCheck(
       throw new Error('window.outreachr command hook unavailable in packaged app');
     }
     const bootstrap = await window.outreachr.bootstrap();
-    const appDetail = await window.outreachr.command('application.get', { applicationId: ${JSON.stringify(expectedApplicationId)} });
+    const appDetail = await window.outreachr.command('application.get', { id: ${JSON.stringify(expectedApplicationId)} });
     if (!appDetail || appDetail.id !== ${JSON.stringify(expectedApplicationId)}) {
       throw new Error('Persisted application record ' + ${JSON.stringify(expectedApplicationId)} + ' was not found on relaunch');
     }
@@ -499,11 +503,7 @@ export async function stageDistributions(root, options = {}, deps = {}) {
             () => remTree(mountpoint),
             () => remTree(installRoot),
           );
-          throwWithCleanup(
-            error,
-            await collectCleanupErrors(cleanups),
-            'DMG distribution staging',
-          );
+          throwWithCleanup(error, await collectCleanupErrors(cleanups), 'DMG distribution staging');
         }
       }
 
@@ -666,10 +666,14 @@ export async function stageDistributions(root, options = {}, deps = {}) {
           throw new Error('Refusing to replace an existing /usr/bin/outreachr entry');
         }
         try {
-          await runCmd('sudo', ['apt-get', 'install', '--yes', '--no-install-recommends', debs[0]], {
-            capture: false,
-            timeoutMs: 120_000,
-          });
+          await runCmd(
+            'sudo',
+            ['apt-get', 'install', '--yes', '--no-install-recommends', debs[0]],
+            {
+              capture: false,
+              timeoutMs: 120_000,
+            },
+          );
           const installedFiles = (await runCmd('dpkg', ['--listfiles', packageName])).stdout
             .split(/\r?\n/)
             .filter(Boolean);
@@ -720,7 +724,7 @@ export async function stageDistributions(root, options = {}, deps = {}) {
   }
 }
 
-export async function cleanupDistributions(distributions, deps = {}) {
+export async function cleanupDistributions(distributions) {
   return await collectCleanupErrors(
     [...distributions].reverse().map((distribution) => () => distribution.cleanup()),
   );
@@ -836,7 +840,7 @@ export async function waitForRendererReadiness(port, timeout, deps = {}) {
         const snapshot = await evaluateRendererReadiness(target.webSocketDebuggerUrl, deps);
         if (
           ['interactive', 'complete'].includes(snapshot.readyState) &&
-          snapshot.title === 'Outreachr' &&
+          snapshot.title.includes('Outreachr') &&
           snapshot.rootChildCount > 0 &&
           snapshot.bodyTextLength > 40 &&
           !snapshot.loading &&
@@ -863,7 +867,7 @@ export async function evaluateRendererReadiness(webSocketUrl, deps = {}) {
     bodyTextLength: document.body?.innerText?.trim().length ?? 0,
     loading: Boolean(document.querySelector('.loading-screen')),
     error: Boolean(document.querySelector('.error-screen')),
-    workspace: document.querySelector('.onboarding-shell') ? 'onboarding' : document.querySelector('.app-shell') ? 'workspace' : 'unknown'
+    workspace: document.querySelector('.job-setup-shell, .onboarding-shell') ? 'onboarding' : document.querySelector('.app-shell') ? 'workspace' : 'unknown'
   }))()`;
   return await (deps.evaluateCDP ?? evaluateCDP)(webSocketUrl, expression, deps);
 }
@@ -903,6 +907,27 @@ export async function evaluateCDP(webSocketUrl, expression, deps = {}) {
     socket.addEventListener('error', () => {
       clearTimeout(timeout);
       reject(new Error('CDP WebSocket failed'));
+    });
+  });
+}
+
+export async function availablePort() {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close();
+        reject(new Error('Failed to allocate a loopback debugging port'));
+        return;
+      }
+      const { port } = address;
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(port);
+      });
     });
   });
 }

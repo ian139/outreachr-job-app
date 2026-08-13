@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import {
   activePnpmPackageDirectories,
   collectCleanupErrors,
@@ -33,8 +34,8 @@ import { assessReleaseSecrets } from './validate-release-secrets.mjs';
 import { verifyFuseBinary } from './verify-electron-fuses.mjs';
 import { signingStatus } from './write-signing-status.mjs';
 import {
+  driveJobApplicationPersistenceCheck,
   parseSmokeArgs,
-  runPackagedSmoke,
   stageDistributions,
   smokeDistribution,
 } from './smoke-packaged-app.mjs';
@@ -298,6 +299,10 @@ try {
     /macOS signing certificate group is required by the selected policy/,
   );
   assert.throws(
+    () => assessReleaseSecrets({}, 'windows-required'),
+    /Windows Authenticode certificate group is required by the selected policy/,
+  );
+  assert.throws(
     () => assessReleaseSecrets({ OUTREACHR_MAC_CERTIFICATE_BASE64: 'partial' }, 'optional'),
     /partially configured|partial/,
   );
@@ -335,6 +340,19 @@ try {
     overall: 'mac-signed',
     notaryMode: 'apple_id',
     secretMode: 'portable',
+  });
+  const completeWindowsSecrets = {
+    OUTREACHR_WINDOWS_CERTIFICATE_BASE64: 'certificate',
+    OUTREACHR_WINDOWS_CERTIFICATE_PASSWORD: 'password',
+    OUTREACHR_WINDOWS_EXPECTED_PUBLISHER: 'Example Publisher',
+  };
+  assert.deepEqual(assessReleaseSecrets(completeWindowsSecrets, 'windows-required'), {
+    policy: 'windows-required',
+    mac: 'unsigned',
+    windows: 'signed',
+    overall: 'mixed-or-unsigned',
+    notaryMode: 'none',
+    secretMode: 'none',
   });
   assert.throws(
     () =>
@@ -806,12 +824,15 @@ try {
     dmgPath: path.resolve(path.join(temporaryRoot, 'custom.dmg')),
     zipPath: undefined,
   });
+  assert.throws(() => parseSmokeArgs(['--dmg', '--zip']), /Cannot specify both --dmg and --zip/);
   assert.throws(
-    () => parseSmokeArgs(['--dmg', '--zip']),
-    /Cannot specify both --dmg and --zip/,
-  );
-  assert.throws(
-    () => parseSmokeArgs(['--dmg', path.join(temporaryRoot, 'a.dmg'), '--zip', path.join(temporaryRoot, 'b.zip')]),
+    () =>
+      parseSmokeArgs([
+        '--dmg',
+        path.join(temporaryRoot, 'a.dmg'),
+        '--zip',
+        path.join(temporaryRoot, 'b.zip'),
+      ]),
     /Cannot specify both --dmg and --zip/,
   );
   assert.throws(
@@ -822,14 +843,42 @@ try {
     () => parseSmokeArgs(['--kind', 'dmg', '--zip', path.join(temporaryRoot, 'b.zip')]),
     /Inconsistent --kind "dmg" and --zip option/,
   );
-  assert.throws(
-    () => parseSmokeArgs(['--arch', 'riscv64']),
-    /Invalid architecture "riscv64"/,
-  );
-  assert.throws(
-    () => parseSmokeArgs(['--timeout-ms', 'invalid']),
-    /Invalid --timeout-ms value/,
-  );
+  assert.throws(() => parseSmokeArgs(['--arch', 'riscv64']), /Invalid architecture "riscv64"/);
+  assert.throws(() => parseSmokeArgs(['--timeout-ms', 'invalid']), /Invalid --timeout-ms value/);
+
+  {
+    const expectedId = 'app-persisted-contract';
+    const commandCalls = [];
+    const persistedApplication = {
+      id: expectedId,
+      role: 'Packaged Smoke Reliability Engineer',
+      companyName: 'Acme Packaging Corp',
+    };
+    const fakeWindow = {
+      outreachr: {
+        bootstrap: async () => ({}),
+        command: async (name, payload) => {
+          commandCalls.push({ name, payload });
+          return persistedApplication;
+        },
+      },
+    };
+    const result = await driveJobApplicationPersistenceCheck(9_100, expectedId, {
+      getDevToolsTargets: async () => [
+        { type: 'page', webSocketDebuggerUrl: 'ws://packaged-smoke.test' },
+      ],
+      evaluateCDP: async (_webSocketUrl, expression) =>
+        await runInNewContext(expression, { window: fakeWindow }),
+    });
+    assert.equal(commandCalls.length, 1);
+    assert.equal(commandCalls[0].name, 'application.get');
+    assert.equal(commandCalls[0].payload.id, expectedId);
+    assert.equal(Object.keys(commandCalls[0].payload).length, 1);
+    assert.equal(result.verified, true);
+    assert.equal(result.applicationId, persistedApplication.id);
+    assert.equal(result.role, persistedApplication.role);
+    assert.equal(result.companyName, persistedApplication.companyName);
+  }
 
   // Behavioral Self-Tests using Fakes (Isolation, Profile Reuse, Explicit Paths, Multi-Arch Selection, Cleanup, Persistence Failure)
   {
@@ -859,7 +908,11 @@ try {
     assert.equal(stageResult.length, 1);
     assert.equal(stageResult[0].kind, 'DMG installation');
     assert.equal(stagedExplicit.length, 1);
-    assert.equal(stagedExplicit[0].target, explicitDmg, 'Explicit DMG path must be attached directly');
+    assert.equal(
+      stagedExplicit[0].target,
+      explicitDmg,
+      'Explicit DMG path must be attached directly',
+    );
     await stageResult[0].cleanup();
   }
 
@@ -892,7 +945,11 @@ try {
       fakeDepsMultiArch,
     );
     assert.equal(stagedArm64.length, 1);
-    assert.equal(attachedTargets[0], multiArchFiles[0], 'Must select arm64 DMG artifact when --arch arm64 is requested');
+    assert.equal(
+      attachedTargets[0],
+      multiArchFiles[0],
+      'Must select arm64 DMG artifact when --arch arm64 is requested',
+    );
     await stagedArm64[0].cleanup();
 
     // Ambiguous multi-arch without --arch must throw clear error
@@ -954,7 +1011,11 @@ try {
         };
       },
       driveJobApplicationPersistenceCheck: async (port, expectedId) => {
-        assert.equal(expectedId, session1CreatedAppId, 'Session 2 must check persistence for the exact applicationId created in Session 1');
+        assert.equal(
+          expectedId,
+          session1CreatedAppId,
+          'Session 2 must check persistence for the exact applicationId created in Session 1',
+        );
         return {
           verified: true,
           applicationId: expectedId,
@@ -974,18 +1035,38 @@ try {
     await smokeDistribution(fakeDistribution, 5000, fakeDepsSuccess);
 
     // Profile uniqueness & reuse assertions
-    assert.equal(spawnedArgs.length, 2, 'Must launch application twice (Session 1 Creation and Session 2 Persistence Check)');
+    assert.equal(
+      spawnedArgs.length,
+      2,
+      'Must launch application twice (Session 1 Creation and Session 2 Persistence Check)',
+    );
     const session1Profile = spawnedArgs[0].profile;
     const session2Profile = spawnedArgs[1].profile;
-    assert.ok(session1Profile.includes('outreachr-smoke-profile-'), 'Profile directory must be a dedicated temporary directory');
-    assert.equal(session1Profile, session2Profile, 'Session 2 must reuse the exact same user data profile directory as Session 1');
+    assert.ok(
+      session1Profile.includes('outreachr-smoke-profile-'),
+      'Profile directory must be a dedicated temporary directory',
+    );
+    assert.equal(
+      session1Profile,
+      session2Profile,
+      'Session 2 must reuse the exact same user data profile directory as Session 1',
+    );
 
     // Process termination assertions
-    assert.ok(terminatedPids.includes(spawnedArgs[0].pid), 'Session 1 process tree must be terminated');
-    assert.ok(terminatedPids.includes(spawnedArgs[1].pid), 'Session 2 process tree must be terminated');
+    assert.ok(
+      terminatedPids.includes(spawnedArgs[0].pid),
+      'Session 1 process tree must be terminated',
+    );
+    assert.ok(
+      terminatedPids.includes(spawnedArgs[1].pid),
+      'Session 2 process tree must be terminated',
+    );
 
     // Cleanup assertion
-    assert.ok(removedTrees.includes(session1Profile), 'Profile directory must be cleaned up on success');
+    assert.ok(
+      removedTrees.includes(session1Profile),
+      'Profile directory must be cleaned up on success',
+    );
   }
 
   {
@@ -1026,7 +1107,9 @@ try {
         companyName: 'Acme Packaging Corp',
       }),
       driveJobApplicationPersistenceCheck: async () => {
-        throw new Error('Persisted application record app-record-xyz-789 was not found on relaunch');
+        throw new Error(
+          'Persisted application record app-record-xyz-789 was not found on relaunch',
+        );
       },
       terminateTree: async () => {},
       removeTree: async (target) => {
@@ -1081,7 +1164,10 @@ try {
       /Renderer failed to initialize during Session 1/,
     );
 
-    assert.ok(profileRemoved, 'Temporary profile directory must be cleaned up when primary smoke execution fails');
+    assert.ok(
+      profileRemoved,
+      'Temporary profile directory must be cleaned up when primary smoke execution fails',
+    );
   }
 
   console.log(

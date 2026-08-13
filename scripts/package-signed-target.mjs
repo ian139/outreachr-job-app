@@ -34,7 +34,10 @@ if (signingSource === 'local-keychain') {
   const configuration = localKeychainSigningConfiguration(process.env);
   localIdentity = await preflightLocalDeveloperId(configuration);
 } else {
-  assessReleaseSecrets(process.env, process.platform === 'darwin' ? 'mac-required' : 'required');
+  assessReleaseSecrets(
+    process.env,
+    process.platform === 'darwin' ? 'mac-required' : 'windows-required',
+  );
 }
 
 const assets = await materializeSigningAssets({ source: signingSource });

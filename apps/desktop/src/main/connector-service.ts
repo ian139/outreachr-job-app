@@ -432,7 +432,8 @@ export class ConnectorService {
     this.#secureStore.bindVault(() => this.#vault.vault);
     this.#openExternal = options.openExternal;
     const baseFetch = options.fetch ?? fetch;
-    const auditSummaryPath = options.auditSummaryPath ?? process.env.OUTREACHR_LIVE_SMOKE_AUDIT_PATH;
+    const auditSummaryPath =
+      options.auditSummaryPath ?? process.env.OUTREACHR_LIVE_SMOKE_AUDIT_PATH;
     this.#fetch = auditSummaryPath
       ? createAuditedFetch(baseFetch, {
           summaryPath: auditSummaryPath,
@@ -675,7 +676,10 @@ export class ConnectorService {
     return config.scopes.includes(this.#inboxReadScope(provider));
   }
 
-  #canReadInbox(provider: ConnectorProvider, config: { publicConfig: PublicConfig; scopes: string[] }): boolean {
+  #canReadInbox(
+    provider: ConnectorProvider,
+    config: { publicConfig: PublicConfig; scopes: string[] },
+  ): boolean {
     const profile = config.publicConfig.scopeProfile;
     return (
       (profile === 'read-only' || profile === 'relationship-sync') &&
@@ -687,10 +691,16 @@ export class ConnectorService {
     provider: ConnectorProvider,
     config: { publicConfig: PublicConfig; scopes: string[] },
   ): boolean {
-    return config.publicConfig.scopeProfile === 'relationship-sync' && this.#grantedInboxRead(provider, config);
+    return (
+      config.publicConfig.scopeProfile === 'relationship-sync' &&
+      this.#grantedInboxRead(provider, config)
+    );
   }
 
-  #canSend(provider: ConnectorProvider, config: { publicConfig: PublicConfig; scopes: string[] }): boolean {
+  #canSend(
+    provider: ConnectorProvider,
+    config: { publicConfig: PublicConfig; scopes: string[] },
+  ): boolean {
     return this.#canSyncRelationships(provider, config) && config.publicConfig.capabilities.canSend;
   }
 

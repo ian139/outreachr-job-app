@@ -893,6 +893,122 @@ describe('VaultService with the production investor seed', () => {
       ),
     ).toBe(0);
   });
+  it('approves compliant application drafts while keeping canonical-person sends blocked', async () => {
+    const { service } = await create();
+    await onboard(service);
+    const workspace = await service.setupWorkspace({
+      displayName: 'Application review test',
+      primaryEmail: 'ada@local.test',
+      stages: [{ name: 'Applied', terminal: false }],
+    });
+    const company = await service.createCompany({
+      id: 'company:application-review',
+      name: 'Application Review Co.',
+    });
+    const contact = await service.createContact({
+      id: 'contact:application-review',
+      companyId: company.id,
+      name: 'Hiring Manager',
+      primaryEmail: 'hiring.manager@example.test',
+    });
+    const application = await service.createJobApplication({
+      id: 'application:review',
+      companyId: company.id,
+      role: 'Staff Engineer',
+      stageId: workspace.applicationStages[0]!.id,
+    });
+    await service.linkApplicationContact({
+      applicationId: application.id,
+      contactId: contact.id,
+      relationship: 'Hiring manager',
+      primary: true,
+    });
+    const policy = await service.updateCommunicationPolicy({
+      sendingPaused: false,
+      dailySendLimit: 10,
+      postalAddress: '500 Application Way\nSan Francisco, CA 94107\nUnited States',
+      optOutText: 'Reply "opt out" to unsubscribe.',
+    });
+    const draft = await service.createApplicationDraft({
+      id: 'draft:application-review',
+      applicationId: application.id,
+      contactId: contact.id,
+      provider: 'google',
+      accountEmail: 'ada@local.test',
+      kind: 'initial',
+      subject: 'Following up after our interview',
+      bodyText: [
+        'Hi — thank you for the thoughtful interview.',
+        policy.postalAddress!,
+        policy.optOutText,
+      ].join('\n'),
+    });
+
+    const ready = (await service.bootstrap()).drafts.find((item) => item.id === draft.id)!;
+    expect(ready).toMatchObject({
+      approvalState: 'draft',
+      canApprove: true,
+      canSend: false,
+      approvalBlockReasons: [],
+    });
+    expect(ready.sendBlockReasons).toContain(
+      'Link this draft to one canonical person so lifetime deduplication is enforceable.',
+    );
+
+    const approved = await service.approveDraft(ready.id, ready.contentHash);
+    expect(approved).toMatchObject({ approvalState: 'approved', canSend: false });
+    expect(approved.sendBlockReasons).toContain(
+      'Link this draft to one canonical person so lifetime deduplication is enforceable.',
+    );
+    expect(() =>
+      service.repository.reserveApprovedSend(
+        approved.id,
+        'google',
+        'ada@local.test',
+        '2026-07-31T19:01:00.000Z',
+        'send:application-missing-person',
+      ),
+    ).toThrow('Approved sends must be linked to a person');
+    expect(Number(service.vault.scalar('SELECT COUNT(*) FROM send_ledger'))).toBe(0);
+  });
+
+  it('keeps non-application drafts without a canonical person approval-blocked', async () => {
+    const { service } = await create();
+    await onboard(service);
+    const policy = await service.updateCommunicationPolicy({
+      sendingPaused: false,
+      dailySendLimit: 10,
+      postalAddress: '500 Application Way\nSan Francisco, CA 94107\nUnited States',
+      optOutText: 'Reply "opt out" to unsubscribe.',
+    });
+    service.repository.createMessageDraft({
+      id: 'draft:missing-person',
+      roundId: null,
+      targetId: null,
+      recipientPersonId: null,
+      recipientAddress: 'unlinked.recipient@example.test',
+      provider: 'google',
+      senderAddress: 'ada@local.test',
+      messageKind: 'initial',
+      providerThreadId: null,
+      subject: 'Legacy draft without canonical person',
+      bodyText: ['A compliant legacy draft.', policy.postalAddress!, policy.optOutText].join('\n'),
+      attachments: [],
+      createdAt: '2026-07-31T19:00:00.000Z',
+      updatedAt: '2026-07-31T19:00:00.000Z',
+    });
+
+    const draft = (await service.bootstrap()).drafts.find(
+      (item) => item.id === 'draft:missing-person',
+    )!;
+    expect(draft).toMatchObject({ canApprove: false, canSend: false });
+    expect(draft.approvalBlockReasons).toContain(
+      'Link this draft to one canonical person so lifetime deduplication is enforceable.',
+    );
+    await expect(service.approveDraft(draft.id, draft.contentHash)).rejects.toThrow(
+      'Link this draft to one canonical person so lifetime deduplication is enforceable.',
+    );
+  });
 
   it('keeps drafts editable but blocks approval until the configured footer is visibly present', async () => {
     const { service } = await create();

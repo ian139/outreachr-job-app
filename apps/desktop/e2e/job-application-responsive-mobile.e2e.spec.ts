@@ -34,6 +34,10 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
       .getByRole('button', { name: 'New application', exact: true })
       .click();
     await expect(page.getByRole('heading', { name: 'Lead Mobile Engineer' })).toBeVisible();
+    const notificationDismissals = page.getByRole('button', { name: 'Dismiss notification' });
+    while ((await notificationDismissals.count()) > 0) {
+      await notificationDismissals.first().click();
+    }
 
     const viewports = [
       { name: 'desktop-wide', width: 1440, height: 1000 },
@@ -41,6 +45,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
       { name: 'mobile-portrait', width: 390, height: 844 },
       { name: 'compact-mobile', width: 320, height: 700 },
     ];
+    const measurements: Array<Record<string, unknown>> = [];
 
     for (const vp of viewports) {
       // Application detail view measurement & screenshot
@@ -54,6 +59,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
         `applications-detail-${vp.name}`,
       );
       expect(appLayout.overflowX).toBe(false);
+      measurements.push({ viewport: vp, surface: 'applications-detail', ...appLayout });
 
       // Inbox detail view measurement & screenshot
       await navigate(page, 'Inbox');
@@ -66,6 +72,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
         `inbox-detail-${vp.name}`,
       );
       expect(inboxLayout.overflowX).toBe(false);
+      measurements.push({ viewport: vp, surface: 'inbox-detail', ...inboxLayout });
 
       // On mobile viewports, validate control touch targets and back buttons
       if (vp.width <= 390) {
@@ -95,10 +102,15 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
           undersizedControls,
           `All visible controls must be >= 44px on mobile (${vp.width}x${vp.height})`,
         ).toEqual([]);
+        measurements.push({ viewport: vp, surface: 'applications-list-controls', controls });
       }
     }
 
     await assertNoHorizontalScroll(page);
+    await testInfo.attach('responsive-measurements.json', {
+      body: Buffer.from(JSON.stringify(measurements, null, 2)),
+      contentType: 'application/json',
+    });
     expect(rendererErrors).toEqual([]);
   });
 });

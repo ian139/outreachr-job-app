@@ -237,12 +237,10 @@ describe('InboxPage component & messaging behavior', () => {
         encryptionAvailable: true,
       },
     ];
-    const listMailThreads = vi.fn(
-      async (): Promise<MailThreadListPage> => ({
-        threads: [mockThreadSummary1],
-        nextCursor: null,
-      }),
-    );
+    const listMailThreads = vi.fn(async (): Promise<MailThreadListPage> => ({
+      threads: [mockThreadSummary1],
+      nextCursor: null,
+    }));
     const bridge = installBridge(fixture);
     bridge.listMailThreads = listMailThreads;
     bridge.cancelMailRequest = vi.fn(async () => {});

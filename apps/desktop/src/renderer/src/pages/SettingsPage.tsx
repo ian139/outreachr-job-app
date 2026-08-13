@@ -415,9 +415,8 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
                   <strong>Add delegated Graph permissions</strong>
                   <p>
                     Read-only uses User.Read and Mail.ReadBasic. Standard adds Mail.Send,
-                    Calendars.ReadWrite, and offline_access. Relationship sync keeps standard
-                    access plus Mail.ReadBasic for relationship history; it is required before
-                    sending.
+                    Calendars.ReadWrite, and offline_access. Relationship sync keeps standard access
+                    plus Mail.ReadBasic for relationship history; it is required before sending.
                   </p>
                   <ExternalLinkButton href={officialLinks.microsoftPermissions}>
                     Graph permission reference

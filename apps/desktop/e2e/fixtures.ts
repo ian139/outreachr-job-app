@@ -145,9 +145,7 @@ async function getSanitizedRendererState(page: Page): Promise<string> {
         if (!el) return 'absent';
         const style = window.getComputedStyle(el);
         const isVisible =
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          style.opacity !== '0';
+          style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
         return isVisible ? 'visible' : 'hidden';
       };
 
@@ -164,9 +162,7 @@ async function getSanitizedRendererState(page: Page): Promise<string> {
         : null;
 
       const sanitizedMsg = rawMsg
-        ? rawMsg
-            .replace(/[a-zA-Z0-9_-]{20,}/g, '[REDACTED_KEY]')
-            .slice(0, 300)
+        ? rawMsg.replace(/[a-zA-Z0-9_-]{20,}/g, '[REDACTED_KEY]').slice(0, 300)
         : null;
       return {
         url: window.location.href,
@@ -263,7 +259,12 @@ export async function connectGoogleRelationshipSync(page: Page): Promise<void> {
 }
 
 export async function completeOnboarding(page: Page): Promise<void> {
-  if (await page.getByRole('navigation', { name: 'Primary navigation' }).isVisible().catch(() => false)) {
+  if (
+    await page
+      .getByRole('navigation', { name: 'Primary navigation' })
+      .isVisible()
+      .catch(() => false)
+  ) {
     await page.evaluate(async (path) => {
       await window.outreachr.command('data.importSeed', { path });
     }, investorSeedPath);

@@ -25,7 +25,7 @@ const APPLE_ID_NOTARY_GROUP = [
 ];
 
 export function assessReleaseSecrets(environment = process.env, policy = 'mac-required') {
-  if (!['optional', 'required', 'mac-required', 'strict'].includes(policy)) {
+  if (!['optional', 'required', 'mac-required', 'windows-required', 'strict'].includes(policy)) {
     throw new Error(`Unknown release-signing policy: ${policy}`);
   }
 
@@ -74,7 +74,8 @@ export function assessReleaseSecrets(environment = process.env, policy = 'mac-re
 
   const effectiveMacRequired =
     policy === 'mac-required' || policy === 'required' || policy === 'strict';
-  const effectiveWinRequired = policy === 'required' || policy === 'strict';
+  const effectiveWinRequired =
+    policy === 'windows-required' || policy === 'required' || policy === 'strict';
 
   if (effectiveMacRequired && macSigning.state !== 'complete') {
     problems.push('macOS signing certificate group is required by the selected policy');
@@ -116,11 +117,7 @@ export function assessReleaseSecrets(environment = process.env, policy = 'mac-re
         : 'none';
 
   const overall =
-    macSigned && winSigned
-      ? 'fully-signed'
-      : macSigned
-        ? 'mac-signed'
-        : 'mixed-or-unsigned';
+    macSigned && winSigned ? 'fully-signed' : macSigned ? 'mac-signed' : 'mixed-or-unsigned';
 
   return {
     policy,

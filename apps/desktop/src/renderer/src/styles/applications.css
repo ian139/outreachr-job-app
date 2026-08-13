@@ -9,7 +9,7 @@
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
-  color: #0f172a;
+  color: var(--ink);
 }
 
 /* Page Header & Top Bar */
@@ -20,21 +20,21 @@
   justify-content: space-between;
   gap: 1rem;
   padding-bottom: 1rem;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
 }
 
 .applications-header__title-group h1 {
   margin: 0;
   font-size: 1.5rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--ink-strong);
   letter-spacing: -0.02em;
 }
 
 .applications-header__title-group p {
   margin: 0.25rem 0 0 0;
   font-size: 0.875rem;
-  color: #64748b;
+  color: var(--muted);
 }
 
 .applications-header__actions {

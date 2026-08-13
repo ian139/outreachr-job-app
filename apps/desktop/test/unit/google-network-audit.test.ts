@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   GoogleMutationDisallowedError,
-  GoogleNetworkAuditor,
   GoogleUnexpectedEndpointError,
   classifyGoogleEndpoint,
   createAuditedFetch,
@@ -32,7 +31,9 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
       });
 
       // Allowed GET /auth
-      expect(classifyGoogleEndpoint('GET', 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid'),
+      ).toEqual({
         endpointClass: 'oauth.authorize',
         isAllowed: true,
         isGmailMutation: false,
@@ -40,7 +41,9 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
       });
 
       // Disallowed POST /auth
-      expect(classifyGoogleEndpoint('POST', 'https://accounts.google.com/o/oauth2/v2/auth')).toEqual({
+      expect(
+        classifyGoogleEndpoint('POST', 'https://accounts.google.com/o/oauth2/v2/auth'),
+      ).toEqual({
         endpointClass: 'oauth.authorize.unexpected_method',
         isAllowed: false,
         isGmailMutation: false,
@@ -48,7 +51,9 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
       });
 
       // Allowed GET /userinfo
-      expect(classifyGoogleEndpoint('GET', 'https://www.googleapis.com/oauth2/v2/userinfo')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://www.googleapis.com/oauth2/v2/userinfo'),
+      ).toEqual({
         endpointClass: 'oauth.userinfo',
         isAllowed: true,
         isGmailMutation: false,
@@ -56,7 +61,9 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
       });
 
       // Disallowed POST /userinfo
-      expect(classifyGoogleEndpoint('POST', 'https://www.googleapis.com/oauth2/v2/userinfo')).toEqual({
+      expect(
+        classifyGoogleEndpoint('POST', 'https://www.googleapis.com/oauth2/v2/userinfo'),
+      ).toEqual({
         endpointClass: 'oauth.userinfo.unexpected_method',
         isAllowed: false,
         isGmailMutation: false,
@@ -65,14 +72,21 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
     });
 
     it('classifies allowed Gmail GET read operations ONLY', () => {
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages'),
+      ).toEqual({
         endpointClass: 'gmail.messages.list',
         isAllowed: true,
         isGmailMutation: false,
         isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123')).toEqual({
+      expect(
+        classifyGoogleEndpoint(
+          'GET',
+          'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123',
+        ),
+      ).toEqual({
         endpointClass: 'gmail.messages.get',
         isAllowed: true,
         isGmailMutation: false,
@@ -80,7 +94,10 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
       });
 
       expect(
-        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123/attachments/att_456'),
+        classifyGoogleEndpoint(
+          'GET',
+          'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123/attachments/att_456',
+        ),
       ).toEqual({
         endpointClass: 'gmail.attachments.get',
         isAllowed: true,
@@ -88,14 +105,21 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
         isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads'),
+      ).toEqual({
         endpointClass: 'gmail.threads.list',
         isAllowed: true,
         isGmailMutation: false,
         isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_789')).toEqual({
+      expect(
+        classifyGoogleEndpoint(
+          'GET',
+          'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_789',
+        ),
+      ).toEqual({
         endpointClass: 'gmail.threads.get',
         isAllowed: true,
         isGmailMutation: false,
@@ -104,28 +128,39 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
     });
 
     it('disallows uncontracted Google endpoints as unexpected (OAuth revoke, Gmail labels/drafts/profile, Calendar)', () => {
-      expect(classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com/revoke?token=123')).toEqual({
+      expect(
+        classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com/revoke?token=123'),
+      ).toEqual({
         endpointClass: 'oauth.revoke',
         isAllowed: false,
         isGmailMutation: false,
         isUnexpected: true,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/labels')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/labels'),
+      ).toEqual({
         endpointClass: 'gmail.labels.get',
         isAllowed: false,
         isGmailMutation: false,
         isUnexpected: true,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/drafts')).toEqual({
+      expect(
+        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/drafts'),
+      ).toEqual({
         endpointClass: 'gmail.drafts.get',
         isAllowed: false,
         isGmailMutation: false,
         isUnexpected: true,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://calendar.googleapis.com/calendar/v3/calendars/primary/events')).toEqual({
+      expect(
+        classifyGoogleEndpoint(
+          'GET',
+          'https://calendar.googleapis.com/calendar/v3/calendars/primary/events',
+        ),
+      ).toEqual({
         endpointClass: 'calendar.events.list',
         isAllowed: false,
         isGmailMutation: false,
@@ -134,12 +169,29 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
     });
 
     it('enforces exact host matching and rejects spoofed subdomains', () => {
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com.evil.test/gmail/v1/users/me/messages')).toEqual({
+      expect(
+        classifyGoogleEndpoint(
+          'GET',
+          'https://gmail.googleapis.com.evil.test/gmail/v1/users/me/messages',
+        ),
+      ).toEqual({
         endpointClass: 'external.unexpected',
         isAllowed: false,
         isGmailMutation: false,
         isUnexpected: true,
       });
+
+      for (const [url, endpointClass] of [
+        ['https://gmail.googleapis.com/evil/token', 'gmail.read.unexpected'],
+        ['http://127.0.0.1/gmail/v1/users/me/messages', 'external.unexpected'],
+        ['http://localhost/users/me/messages', 'external.unexpected'],
+      ]) {
+        expect(classifyGoogleEndpoint('GET', url)).toMatchObject({
+          endpointClass,
+          isAllowed: false,
+          isUnexpected: true,
+        });
+      }
     });
   });
 
@@ -149,7 +201,9 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
         'https://gmail.googleapis.com/gmail/v1/users/founder%40company.test/messages/msg_9999/attachments/att_1111?format=metadata&access_token=ya29.secret_token_val&q=from%3Acandidate%40test.org';
       const redacted = redactGoogleUrl(raw);
 
-      expect(redacted).toBe('https://gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId');
+      expect(redacted).toBe(
+        'https://gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId',
+      );
       expect(redacted).not.toContain('founder');
       expect(redacted).not.toContain('msg_9999');
       expect(redacted).not.toContain('secret_token_val');
@@ -159,11 +213,16 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
   describe('Disallowed requests prevent network fetch invocation', () => {
     it('prevents fetchFn from being called when a Gmail mutation or unexpected request occurs', async () => {
       const mockFetch = vi.fn(async () => new Response('{}', { status: 200 }));
-      const auditedFetch = createAuditedFetch(mockFetch, { throwOnMutation: true, throwOnUnexpected: true });
+      const auditedFetch = createAuditedFetch(mockFetch, {
+        throwOnMutation: true,
+        throwOnUnexpected: true,
+      });
 
       // Disallowed mutation must throw and prevent mockFetch invocation
       await expect(
-        auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST' }),
+        auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+        }),
       ).rejects.toThrow(GoogleMutationDisallowedError);
 
       expect(mockFetch).not.toHaveBeenCalled();
@@ -175,8 +234,18 @@ describe('Redacted Google Network Audit Mechanic (Production-Owned Fail-Closed)'
 
       expect(mockFetch).not.toHaveBeenCalled();
 
+      const requestWithOverriddenMethod = new Request(
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      );
+      await expect(auditedFetch(requestWithOverriddenMethod, { method: 'POST' })).rejects.toThrow(
+        GoogleMutationDisallowedError,
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+
       // Allowed GET request succeeds and invokes mockFetch
-      await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages', { method: 'GET' });
+      await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages', {
+        method: 'GET',
+      });
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
   });

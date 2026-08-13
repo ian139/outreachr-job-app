@@ -127,8 +127,8 @@ test.describe('Job Application Lifecycle & Record Management', () => {
     await page.getByRole('button', { name: 'Review draft' }).click();
     await expect(page.getByRole('dialog', { name: 'Review draft' })).toBeVisible();
 
-    // Safety defaults fail closed: no send control and approval remains blocked until all
-    // exact-content, canonical-recipient, and sender-compliance requirements are satisfied.
+    // Safety defaults fail closed: approval requires exact sender-compliance content,
+    // and any later send also requires a canonical recipient plus an explicit approval.
     const reviewDialog = page.getByRole('dialog', { name: 'Review draft' });
     await expect(reviewDialog.getByRole('button', { name: 'Send draft' })).toHaveCount(0);
     await expect(reviewDialog.getByRole('button', { name: 'Approve draft' })).toBeDisabled();

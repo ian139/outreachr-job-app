@@ -408,7 +408,7 @@ export function InboxPage(): React.JSX.Element {
             </div>
           </div>
 
-          <div className="inbox-thread-list" role="list">
+          <div className="inbox-thread-list">
             {connectedAccounts.length === 0 ? (
               <EmptyState
                 title="No connected accounts"

@@ -90,9 +90,7 @@ const RELATIONSHIP_SYNC_CAPABILITIES: ConnectorCapabilities = {
  * inbox reading (read-only) is never presented as send-ready relationship
  * sync.
  */
-export const SCOPE_PROFILE_CAPABILITIES: Readonly<
-  Record<ScopeProfile, ConnectorCapabilities>
-> = {
+export const SCOPE_PROFILE_CAPABILITIES: Readonly<Record<ScopeProfile, ConnectorCapabilities>> = {
   'read-only': READ_ONLY_CAPABILITIES,
   minimum: MINIMUM_CAPABILITIES,
   'relationship-sync': RELATIONSHIP_SYNC_CAPABILITIES,
@@ -128,5 +126,7 @@ export function resolveScopeProfile(config: {
   scopeProfile?: ScopeProfile | undefined;
   relationshipSync?: boolean | undefined;
 }): ScopeProfile {
-  return config.scopeProfile ?? (config.relationshipSync === true ? 'relationship-sync' : 'minimum');
+  return (
+    config.scopeProfile ?? (config.relationshipSync === true ? 'relationship-sync' : 'minimum')
+  );
 }

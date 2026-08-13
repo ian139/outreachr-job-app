@@ -12,12 +12,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const auditModulePath = path.join(rootDir, 'apps', 'desktop', 'src', 'main', 'google-network-audit.ts');
+const auditModulePath = path.join(
+  rootDir,
+  'apps',
+  'desktop',
+  'src',
+  'main',
+  'google-network-audit.ts',
+);
 
 const {
   GoogleMutationDisallowedError,
-  GoogleUnexpectedEndpointError,
-  GoogleNetworkAuditor,
   classifyGoogleEndpoint,
   createAuditedFetch,
   redactGoogleUrl,
@@ -29,13 +34,41 @@ console.log('Running offline production-owned fail-closed Google network audit v
 // 1. Verify Method Policy & Allowed Contract
 const allowedEndpoints = [
   { method: 'POST', url: 'https://oauth2.googleapis.com/token', expected: 'oauth.token' },
-  { method: 'GET', url: 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid', expected: 'oauth.authorize' },
-  { method: 'GET', url: 'https://www.googleapis.com/oauth2/v2/userinfo', expected: 'oauth.userinfo' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages', expected: 'gmail.messages.list' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100', expected: 'gmail.messages.get' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100/attachments/att_200', expected: 'gmail.attachments.get' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads', expected: 'gmail.threads.list' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_300', expected: 'gmail.threads.get' },
+  {
+    method: 'GET',
+    url: 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid',
+    expected: 'oauth.authorize',
+  },
+  {
+    method: 'GET',
+    url: 'https://www.googleapis.com/oauth2/v2/userinfo',
+    expected: 'oauth.userinfo',
+  },
+  {
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
+    expected: 'gmail.messages.list',
+  },
+  {
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100',
+    expected: 'gmail.messages.get',
+  },
+  {
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100/attachments/att_200',
+    expected: 'gmail.attachments.get',
+  },
+  {
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads',
+    expected: 'gmail.threads.list',
+  },
+  {
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_300',
+    expected: 'gmail.threads.get',
+  },
 ];
 
 for (const sample of allowedEndpoints) {
@@ -46,14 +79,23 @@ for (const sample of allowedEndpoints) {
 
 // 2. Verify Method Policy Violations (GET /token, POST /auth, POST /userinfo -> Disallowed)
 assert.equal(classifyGoogleEndpoint('GET', 'https://oauth2.googleapis.com/token').isAllowed, false);
-assert.equal(classifyGoogleEndpoint('POST', 'https://accounts.google.com/o/oauth2/v2/auth').isAllowed, false);
-assert.equal(classifyGoogleEndpoint('POST', 'https://www.googleapis.com/oauth2/v2/userinfo').isAllowed, false);
+assert.equal(
+  classifyGoogleEndpoint('POST', 'https://accounts.google.com/o/oauth2/v2/auth').isAllowed,
+  false,
+);
+assert.equal(
+  classifyGoogleEndpoint('POST', 'https://www.googleapis.com/oauth2/v2/userinfo').isAllowed,
+  false,
+);
 
 // 3. Verify Redaction
 const rawSensitiveUrl =
   'https://gmail.googleapis.com/gmail/v1/users/founder%40company.test/messages/msg_9999?format=metadata&access_token=ya29.secret_token_val&q=from%3Acandidate%40test.org';
 const redactedUrl = redactGoogleUrl(rawSensitiveUrl);
-assert.equal(redactedUrl, 'https://gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId');
+assert.equal(
+  redactedUrl,
+  'https://gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId',
+);
 assert(!redactedUrl.includes('founder'), 'Redacted URL must not contain user email');
 assert(!redactedUrl.includes('msg_9999'), 'Redacted URL must not contain message ID');
 assert(!redactedUrl.includes('secret_token_val'), 'Redacted URL must not contain access token');
@@ -64,14 +106,23 @@ const mockFetch = async () => {
   mockFetchCalled = true;
   return new Response('{}', { status: 200 });
 };
-const auditedFetch = createAuditedFetch(mockFetch, { throwOnMutation: true, throwOnUnexpected: true });
+const auditedFetch = createAuditedFetch(mockFetch, {
+  throwOnMutation: true,
+  throwOnUnexpected: true,
+});
 
 try {
-  await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST' });
+  await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+  });
   assert.fail('Audited fetch must throw on Gmail mutation attempt');
 } catch (error) {
   assert(error instanceof GoogleMutationDisallowedError);
-  assert.equal(mockFetchCalled, false, 'Fetch function must NEVER be called when request is disallowed');
+  assert.equal(
+    mockFetchCalled,
+    false,
+    'Fetch function must NEVER be called when request is disallowed',
+  );
 }
 
 // 5. Verify Initial Summary File Creation and Persistence
@@ -89,7 +140,10 @@ try {
 
   // Record allowed requests
   fileAuditor.recordRequest({ method: 'POST', url: 'https://oauth2.googleapis.com/token' });
-  fileAuditor.recordRequest({ method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages' });
+  fileAuditor.recordRequest({
+    method: 'GET',
+    url: 'https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages',
+  });
 
   const updatedRaw = await fs.readFile(tempSummaryPath, 'utf8');
   const updatedSummary = JSON.parse(updatedRaw);

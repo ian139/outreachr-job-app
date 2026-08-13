@@ -1295,10 +1295,7 @@ export class VaultService {
       const publicConfig = JSON.parse(publicConfigJson) as Record<string, unknown>;
       return resolveScopeProfile({
         scopeProfile: publicConfig.scopeProfile as
-          | 'read-only'
-          | 'minimum'
-          | 'relationship-sync'
-          | undefined,
+          'read-only' | 'minimum' | 'relationship-sync' | undefined,
         relationshipSync:
           typeof publicConfig.relationshipSync === 'boolean'
             ? publicConfig.relationshipSync
@@ -1317,16 +1314,24 @@ export class VaultService {
     DraftMessage,
     'canApprove' | 'canSend' | 'approvalBlockReasons' | 'sendBlockReasons' | 'blockReason'
   > {
-    const approvalBlockReasons = this.#repository.messageComplianceIssues(message.id);
-    if (!message.recipient_person_id) {
-      approvalBlockReasons.push(
-        'Link this draft to one canonical person before approval so lifetime deduplication is enforceable.',
-      );
+    const complianceIssues = this.#repository.messageComplianceIssues(message.id);
+    const applicationBound =
+      Boolean(message.application_id) && Boolean(message.application_contact_id);
+    const missingPersonReason =
+      'Link this draft to one canonical person so lifetime deduplication is enforceable.';
+    // Application contacts provide a durable local review identity, but they do
+    // not satisfy the canonical-person requirement enforced by outbound sends.
+    const approvalBlockReasons = [...complianceIssues];
+    if (!message.recipient_person_id && !applicationBound) {
+      approvalBlockReasons.push(missingPersonReason);
     }
     if (person?.suppressionReason) approvalBlockReasons.push(person.suppressionReason);
 
     const policy = this.#communicationPolicy();
     const sendBlockReasons = [...approvalBlockReasons];
+    if (!message.recipient_person_id && applicationBound) {
+      sendBlockReasons.push(missingPersonReason);
+    }
     if (message.message_kind !== 'initial') {
       sendBlockReasons.push(
         'Stock Outreachr 0.1 sends initial outreach only; keep this message local for review.',
@@ -1394,10 +1399,7 @@ export class VaultService {
         const publicConfig = JSON.parse(connector.public_config_json) as Record<string, unknown>;
         scopeProfile = resolveScopeProfile({
           scopeProfile: publicConfig.scopeProfile as
-            | 'read-only'
-            | 'minimum'
-            | 'relationship-sync'
-            | undefined,
+            'read-only' | 'minimum' | 'relationship-sync' | undefined,
           relationshipSync:
             typeof publicConfig.relationshipSync === 'boolean'
               ? publicConfig.relationshipSync
@@ -2881,7 +2883,10 @@ export class VaultService {
       "SELECT account_label,public_config_json FROM connector_configs WHERE provider=? AND status='connected' ORDER BY updated_at DESC LIMIT 1",
       [input.provider],
     );
-    if (connectorAccount && this.#connectorProfile(connectorAccount.public_config_json) === 'read-only') {
+    if (
+      connectorAccount &&
+      this.#connectorProfile(connectorAccount.public_config_json) === 'read-only'
+    ) {
       throw new Error(
         'This account is connected with read-only access; reconnect with relationship sync enabled before drafting or sending.',
       );

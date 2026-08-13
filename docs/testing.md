@@ -50,12 +50,13 @@ node scripts/smoke-packaged-app.mjs --dmg ./apps/desktop/release/Outreachr-1.0.0
 ```
 
 The packaged application smoke harness performs deterministic verification:
+
 1. **Argument validation**: Accepts `--dmg` (`[path]`), `--zip` (`[path]`), `--kind`, `--arch` (`x64` or `arm64`), `--release-dir`, and `--timeout-ms`. Explicit artifact paths (`--dmg <path>` or `--zip <path>`) stage only the specified artifact file. Validates mutually exclusive options and platform constraints.
 2. **Temporary isolation**: Stages DMGs by mounting with `hdiutil attach -nobrowse -readonly`, copying the `.app` bundle via `ditto` to a temporary directory in `os.tmpdir()`, unmounting the DMG, and extracting ZIPs into an isolated temporary folder. Never installs globally.
 3. **Code signature enforcement**: Executes `codesign --verify --deep --strict` on the staged `.app` bundle before launch. Missing binaries or invalid code signatures immediately fail staging.
 4. **Lifecycle and persistence protocol**:
    - **Session 1 (Creation)**: Launches the staged binary with an isolated temporary `--user-data-dir` profile and loopback CDP debugging port. Initializes the workspace, creates a company (`Acme Packaging Corp`), and creates a local job application (`Packaged Smoke Reliability Engineer`). Terminates the process cleanly.
-   - **Session 2 (Relaunch Persistence Verification)**: Relaunches the application using the *same* user data profile. Connects via CDP DevTools WebSocket to query `bootstrap` and `application.get`, confirming the job application record persisted accurately across restarts.
+   - **Session 2 (Relaunch Persistence Verification)**: Relaunches the application using the _same_ user data profile. Connects via CDP DevTools WebSocket to query `bootstrap` and `application.get`, confirming the job application record persisted accurately across restarts.
 5. **Clean teardown**: Process trees and all temporary staging/profile directories are automatically removed upon completion or failure using `collectCleanupErrors`.
 
 ## CI matrix

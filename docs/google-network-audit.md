@@ -14,16 +14,16 @@ The mechanic inspects outbound network requests to Google OAuth and Gmail endpoi
 
 The network auditor permits ONLY authentication and explicit Gmail GET read operations:
 
-| Category | HTTP Method | Endpoint Class | Endpoint Pattern | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| **OAuth** | `POST` / `GET` | `oauth.token` | `oauth2.googleapis.com/token` | Code exchange and token refresh |
-| **OAuth** | `GET` | `oauth.authorize` | `accounts.google.com/o/oauth2/v2/auth` | OAuth authorization flow |
-| **OAuth** | `GET` | `oauth.userinfo` | `www.googleapis.com/oauth2/v2/userinfo` | Identity verification |
-| **Gmail** | `GET` | `gmail.messages.list` | `gmail.googleapis.com/gmail/v1/users/:userId/messages` | Message list enumeration |
-| **Gmail** | `GET` | `gmail.messages.get` | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId` | Single message metadata/read |
-| **Gmail** | `GET` | `gmail.attachments.get` | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId` | Attachment retrieval |
-| **Gmail** | `GET` | `gmail.threads.list` | `gmail.googleapis.com/gmail/v1/users/:userId/threads` | Thread list enumeration |
-| **Gmail** | `GET` | `gmail.threads.get` | `gmail.googleapis.com/gmail/v1/users/:userId/threads/:threadId` | Thread read |
+| Category  | HTTP Method    | Endpoint Class          | Endpoint Pattern                                                                            | Description                     |
+| :-------- | :------------- | :---------------------- | :------------------------------------------------------------------------------------------ | :------------------------------ |
+| **OAuth** | `POST` / `GET` | `oauth.token`           | `oauth2.googleapis.com/token`                                                               | Code exchange and token refresh |
+| **OAuth** | `GET`          | `oauth.authorize`       | `accounts.google.com/o/oauth2/v2/auth`                                                      | OAuth authorization flow        |
+| **OAuth** | `GET`          | `oauth.userinfo`        | `www.googleapis.com/oauth2/v2/userinfo`                                                     | Identity verification           |
+| **Gmail** | `GET`          | `gmail.messages.list`   | `gmail.googleapis.com/gmail/v1/users/:userId/messages`                                      | Message list enumeration        |
+| **Gmail** | `GET`          | `gmail.messages.get`    | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId`                           | Single message metadata/read    |
+| **Gmail** | `GET`          | `gmail.attachments.get` | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId` | Attachment retrieval            |
+| **Gmail** | `GET`          | `gmail.threads.list`    | `gmail.googleapis.com/gmail/v1/users/:userId/threads`                                       | Thread list enumeration         |
+| **Gmail** | `GET`          | `gmail.threads.get`     | `gmail.googleapis.com/gmail/v1/users/:userId/threads/:threadId`                             | Thread read                     |
 
 ### Exact Host Matching
 

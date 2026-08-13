@@ -155,9 +155,7 @@ describe('credential setup guidance and renderer boundary', () => {
     expect(
       within(google).queryByRole('button', { name: 'Sync mail history' }),
     ).not.toBeInTheDocument();
-    expect(
-      within(google).queryByRole('button', { name: 'Sync calendar' }),
-    ).not.toBeInTheDocument();
+    expect(within(google).queryByRole('button', { name: 'Sync calendar' })).not.toBeInTheDocument();
 
     fireEvent.click(within(google).getByRole('button', { name: 'Reconnect to change access' }));
     expect(within(google).getByRole('radio', { name: /Read-only/u })).toBeChecked();
@@ -203,9 +201,7 @@ describe('credential setup guidance and renderer boundary', () => {
       target: { value: '123456789.apps.googleusercontent.com' },
     });
     fireEvent.click(within(google).getByRole('radio', { name: /^Standard/u }));
-    fireEvent.click(
-      within(google).getByRole('button', { name: 'Reconnect with selected access' }),
-    );
+    fireEvent.click(within(google).getByRole('button', { name: 'Reconnect with selected access' }));
 
     await waitFor(() =>
       expect(command).toHaveBeenCalledWith('connector.configure', {

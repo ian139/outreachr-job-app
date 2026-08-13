@@ -267,6 +267,7 @@ jobs:
         env:
           OUTREACHR_MAC_CERTIFICATE_BASE64: ${{ secrets.OUTREACHR_MAC_CERTIFICATE_BASE64 }}
           OUTREACHR_MAC_CERTIFICATE_PASSWORD: ${{ secrets.OUTREACHR_MAC_CERTIFICATE_PASSWORD }}
+          OUTREACHR_MAC_EXPECTED_TEAM_ID: ${{ secrets.OUTREACHR_MAC_EXPECTED_TEAM_ID }}
           OUTREACHR_APPLE_API_KEY_BASE64: ${{ secrets.OUTREACHR_APPLE_API_KEY_BASE64 }}
           OUTREACHR_APPLE_API_KEY_ID: ${{ secrets.OUTREACHR_APPLE_API_KEY_ID }}
           OUTREACHR_APPLE_API_ISSUER: ${{ secrets.OUTREACHR_APPLE_API_ISSUER }}
@@ -286,6 +287,7 @@ jobs:
         env:
           OUTREACHR_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.OUTREACHR_WINDOWS_CERTIFICATE_BASE64 }}
           OUTREACHR_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.OUTREACHR_WINDOWS_CERTIFICATE_PASSWORD }}
+          OUTREACHR_WINDOWS_EXPECTED_PUBLISHER: ${{ secrets.OUTREACHR_WINDOWS_EXPECTED_PUBLISHER }}
 
       - name: Build explicitly unsigned Windows package
         if: runner.os == 'Windows' && needs.release-preflight.outputs.windows_signing == 'unsigned'
@@ -295,7 +297,7 @@ jobs:
         if: runner.os == 'Linux'
         run: node scripts/package-target.mjs --release --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
 
-      - name: Verify packaged seed, notices, and agent sidecars
+      - name: Verify packaged seed absence, notices, and agent sidecars
         run: node scripts/verify-packaged-resources.mjs --release-dir apps/desktop/release
 
       - name: Verify hardened Electron fuses

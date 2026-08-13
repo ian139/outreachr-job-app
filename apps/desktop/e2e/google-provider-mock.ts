@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { getResponse, HttpResponse, http, type RequestHandler } from 'msw';
-import { GoogleNetworkAuditor, startGoogleNetworkAudit } from '../src/main/google-network-audit';
+import { startGoogleNetworkAudit } from '../src/main/google-network-audit';
+import type { GoogleNetworkAuditor } from '../src/main/google-network-audit';
 
 export interface GoogleProviderMockState {
   readonly baseUrl: string;
@@ -530,7 +531,9 @@ async function requestFromNode(request: IncomingMessage, baseUrl: string): Promi
   });
 }
 
-export async function startGoogleProviderMock(options?: { throwOnMutation?: boolean }): Promise<GoogleProviderMock> {
+export async function startGoogleProviderMock(options?: {
+  throwOnMutation?: boolean;
+}): Promise<GoogleProviderMock> {
   const sockets = new Set<Socket>();
   let baseUrl = '';
   let handlers: RequestHandler[] = [];
@@ -557,8 +560,26 @@ export async function startGoogleProviderMock(options?: { throwOnMutation?: bool
   const server = createServer((incoming, outgoing) => {
     void (async () => {
       const request = await requestFromNode(incoming, baseUrl);
-      state.requests.push(`${request.method} ${new URL(request.url).pathname}`);
-      auditor.recordRequest({ method: request.method ?? 'GET', url: request.url, headers: request.headers });
+      const providerUrl = new URL(request.url);
+      if (providerUrl.pathname === '/token') {
+        providerUrl.protocol = 'https:';
+        providerUrl.host = 'oauth2.googleapis.com';
+      } else if (providerUrl.pathname === '/v1/userinfo') {
+        providerUrl.protocol = 'https:';
+        providerUrl.host = 'openidconnect.googleapis.com';
+      } else if (providerUrl.pathname.startsWith('/gmail/v1/')) {
+        providerUrl.protocol = 'https:';
+        providerUrl.host = 'gmail.googleapis.com';
+      } else if (providerUrl.pathname.startsWith('/calendar/v3/')) {
+        providerUrl.protocol = 'https:';
+        providerUrl.host = 'calendar.googleapis.com';
+      }
+      state.requests.push(`${request.method} ${providerUrl.pathname}`);
+      auditor.recordRequest({
+        method: request.method ?? 'GET',
+        url: providerUrl,
+        headers: request.headers,
+      });
       const response = await getResponse(handlers, request);
       if (!response) {
         outgoing.writeHead(500, { 'content-type': 'application/json' });

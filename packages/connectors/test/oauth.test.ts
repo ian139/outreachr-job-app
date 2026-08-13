@@ -72,9 +72,9 @@ describe('desktop OAuth and PKCE', () => {
     expect(getCapabilities('relationship-sync').canSend).toBe(true);
     expect(resolveScopeProfile({})).toBe('minimum');
     expect(resolveScopeProfile({ relationshipSync: true })).toBe('relationship-sync');
-    expect(
-      resolveScopeProfile({ scopeProfile: 'read-only', relationshipSync: true }),
-    ).toBe('read-only');
+    expect(resolveScopeProfile({ scopeProfile: 'read-only', relationshipSync: true })).toBe(
+      'read-only',
+    );
   });
 
   it('uses Microsoft delegated scopes and tenant-specific endpoints', async () => {
