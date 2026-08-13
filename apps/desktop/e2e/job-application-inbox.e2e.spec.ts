@@ -43,12 +43,20 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     );
 
     await page.getByRole('button', { name: 'View rich content' }).click();
-    await expect(messageDetail).toBeVisible();
+    await expect(messageDetail.getByRole('heading', { name: 'Senior Software Engineer Interview' })).toBeVisible();
+    await expect(messageDetail.getByRole('list')).toBeVisible();
+    await expect(messageDetail.locator('blockquote')).toContainText('Please bring questions for the team.');
+    await expect(messageDetail.locator('pre code')).toContainText('const interviewConfirmed = true;');
+    await expect(
+      messageDetail.getByRole('link', { name: 'Choose an interview slot' }),
+    ).toHaveAttribute('href', 'https://jobs.techcorp.test/interview');
+    expect(await messageDetail.locator('img').count()).toBe(0);
 
     // 4. Select Sanitized HTML Thread & Verify DOMPurify Strips Script/Style
     await page.getByRole('button', { name: /Job Offer Details/ }).click();
     await expect(messageDetail).toBeVisible();
     await expect(messageDetail).toContainText('Welcome to Acme Corp!');
+    await expect(messageDetail).toContainText('Remote image omitted: Acme logo');
 
     const richBody = page.locator('.inbox-rich-content');
     const hasDangerousTags = await richBody.evaluate((el) =>

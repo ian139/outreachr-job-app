@@ -103,6 +103,29 @@ const mockMessage2Truncated: MailMessageBody = {
   fetchedAt: new Date().toISOString(),
 };
 
+const markdownOnlyBody = [
+  '# Next steps',
+  '',
+  '1. Review the **role brief**',
+  '2. Visit [the secure portal](https://jobs.example.com/interview)',
+  '',
+  '> Please bring questions.',
+  '',
+  '```ts',
+  'const confirmed = true;',
+  '```',
+  '',
+  '<img src="https://tracking.example.com/pixel" onerror="alert(1)">',
+].join('\n');
+
+const mockMessageMarkdownOnly: MailMessageBody = {
+  ...mockMessageHtmlOnly,
+  messageId: 'msg_markdown_only',
+  internetMessageId: '<msg-markdown@company.com>',
+  bodyText: markdownOnlyBody,
+  bodyHtml: null,
+};
+
 function setupInboxFixture() {
   const fixture = bootstrapFixture();
   fixture.connectors = [
@@ -500,6 +523,8 @@ describe('InboxPage component & messaging behavior', () => {
     const plainButton = screen.getByRole('button', { name: 'View plain text' });
 
     expect(richButton).toHaveClass('active');
+    expect(richButton).toHaveAttribute('aria-pressed', 'true');
+    expect(plainButton).toHaveAttribute('aria-pressed', 'false');
 
     // Rich view sanitized HTML check (script stripped, link present)
     const link = await screen.findByRole('link', { name: 'Interview Portal' });
@@ -513,10 +538,40 @@ describe('InboxPage component & messaging behavior', () => {
     // Switch to plain text view
     fireEvent.click(plainButton);
     expect(plainButton).toHaveClass('active');
+    expect(plainButton).toHaveAttribute('aria-pressed', 'true');
+    expect(richButton).toHaveAttribute('aria-pressed', 'false');
     expect(
       screen.getByText(
         'Thanks for submitting your application. We would love to schedule an interview.',
       ),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Markdown-like plain text semantically in rich mode while preserving exact plain mode', async () => {
+    const { getMailThread, openExternal } = setupInboxFixture();
+    getMailThread.mockResolvedValue({
+      thread: mockThreadSummary1,
+      messages: [mockMessageMarkdownOnly],
+      nextCursor: null,
+    });
+    renderInboxPage();
+
+    fireEvent.click(await screen.findByText('Job Application Followup'));
+
+    expect(await screen.findByRole('heading', { name: 'Next steps' })).toBeInTheDocument();
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.getByRole('blockquote')).toHaveTextContent('Please bring questions.');
+    expect(screen.getByText('const confirmed = true;', { selector: 'code' })).toBeInTheDocument();
+    const securePortal = screen.getByRole('link', { name: 'the secure portal' });
+    expect(securePortal).toHaveAttribute('href', 'https://jobs.example.com/interview');
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+
+    fireEvent.click(securePortal);
+    expect(openExternal).toHaveBeenCalledWith('https://jobs.example.com/interview');
+
+    fireEvent.click(screen.getByRole('button', { name: 'View plain text' }));
+    expect(
+      screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === markdownOnlyBody),
     ).toBeInTheDocument();
   });
 

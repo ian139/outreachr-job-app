@@ -96,7 +96,22 @@ function gmailThread(id: string): Record<string, unknown> {
             ],
             body: {
               data: Buffer.from(
-                'Plain text body content for senior software engineer interview.',
+                [
+                  '# Senior Software Engineer Interview',
+                  '',
+                  'Plain text body content for senior software engineer interview.',
+                  '',
+                  '- Review the role brief',
+                  '- [Choose an interview slot](https://jobs.techcorp.test/interview)',
+                  '',
+                  '> Please bring questions for the team.',
+                  '',
+                  '```ts',
+                  'const interviewConfirmed = true;',
+                  '```',
+                  '',
+                  '<img src="https://tracking.techcorp.test/pixel" onerror="alert(1)">',
+                ].join('\n'),
               ).toString('base64url'),
             },
           },
@@ -123,7 +138,7 @@ function gmailThread(id: string): Record<string, unknown> {
             ],
             body: {
               data: Buffer.from(
-                '<p>Welcome to Acme Corp!</p><script>alert("xss")</script><style>body { color: red; }</style><a href="https://acme.test/careers">View Careers</a>',
+                '<p>Welcome to Acme Corp!</p><img src="https://tracking.acme.test/pixel" alt="Acme logo"><script>alert("xss")</script><style>body { color: red; }</style><a href="https://acme.test/careers">View Careers</a>',
               ).toString('base64url'),
             },
           },

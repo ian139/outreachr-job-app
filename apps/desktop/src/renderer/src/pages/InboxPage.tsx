@@ -8,7 +8,7 @@ import type {
   MailViewMode,
 } from '../../../shared/contracts';
 import { Badge, Button, EmptyState, SearchField } from '../components/ui';
-import { htmlToPlainText, sanitizeHtml } from '../lib/sanitizer';
+import { htmlToPlainText, plainTextToSafeHtml, sanitizeHtml } from '../lib/sanitizer';
 import { useWorkspace } from '../state/WorkspaceContext';
 import '../styles/inbox.css';
 
@@ -565,6 +565,7 @@ export function InboxPage(): React.JSX.Element {
                       <button
                         type="button"
                         className={viewMode === 'rich' ? 'active' : ''}
+                        aria-pressed={viewMode === 'rich'}
                         onClick={() => setViewMode('rich')}
                       >
                         View rich content
@@ -572,6 +573,7 @@ export function InboxPage(): React.JSX.Element {
                       <button
                         type="button"
                         className={viewMode === 'plain' ? 'active' : ''}
+                        aria-pressed={viewMode === 'plain'}
                         onClick={() => setViewMode('plain')}
                       >
                         View plain text
@@ -618,9 +620,11 @@ export function InboxPage(): React.JSX.Element {
                   <>
                     {threadDetail.messages.map((message) => {
                       const plainTextContent =
-                        message.bodyText?.trim() ||
-                        htmlToPlainText(message.bodyHtml || '') ||
-                        '(No text content)';
+                        message.bodyText ??
+                        (htmlToPlainText(message.bodyHtml || '') || '(No text content)');
+                      const richContent = message.bodyHtml
+                        ? sanitizeHtml(message.bodyHtml)
+                        : plainTextToSafeHtml(message.bodyText || '(No text content)');
 
                       return (
                         <article key={message.messageId} className="inbox-message-card">
@@ -677,12 +681,10 @@ export function InboxPage(): React.JSX.Element {
                           ) : null}
 
                           <div className="inbox-message-card__body">
-                            {viewMode === 'rich' && message.bodyHtml ? (
+                            {viewMode === 'rich' ? (
                               <div
                                 className="inbox-rich-content"
-                                dangerouslySetInnerHTML={{
-                                  __html: sanitizeHtml(message.bodyHtml),
-                                }}
+                                dangerouslySetInnerHTML={{ __html: richContent }}
                                 onClick={handleRichLinkClick}
                               />
                             ) : (
