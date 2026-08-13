@@ -329,11 +329,11 @@ jobs:
 
       - name: Smoke packaged app
         if: runner.os != 'Linux'
-        run: node scripts/smoke-packaged-app.mjs --release-dir apps/desktop/release
+        run: node scripts/smoke-packaged-app.mjs --release-dir apps/desktop/release --arch ${{ matrix.arch }}
 
       - name: Smoke packaged app under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum node scripts/smoke-packaged-app.mjs --release-dir apps/desktop/release
+        run: xvfb-run --auto-servernum node scripts/smoke-packaged-app.mjs --release-dir apps/desktop/release --arch ${{ matrix.arch }}
 
       - name: Collect macOS distributable artifacts
         if: runner.os == 'macOS'
