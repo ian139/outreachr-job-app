@@ -1,6 +1,6 @@
 # Contributing to Outreachr
 
-Outreachr welcomes code, documentation, accessibility, connector, and rights-reviewed investor-data contributions.
+Outreachr welcomes code, documentation, accessibility, connector, and application-data contributions.
 
 ## Development
 

@@ -25,12 +25,12 @@ Saving an API key makes API-key mode active. A previously saved key may remain e
 
 1. Confirm that Anthropic has approved this Outreachr deployment for third-party subscription authentication. Approval for one distributor or deployment may not transfer to a fork.
 2. Run `claude auth login --claudeai` in a local terminal and complete the official Claude Code sign-in.
-3. In **Settings → Agents**, check the founder attestation and select **Enable subscription access**, then select **Detect**.
+3. In **Settings → Agents**, check the user attestation and select **Enable subscription access**, then select **Detect**.
 4. To stop using the subscription in Outreachr, select **Disable subscription access**. Outreachr does not log out or alter the independent Claude Code session.
 
 The approval choice and timestamp are non-secret device-local preferences in SQLite. OAuth credentials remain owned by the official Claude runtime and its OS keychain/config; Outreachr never asks for, copies, stores, returns, exports, or logs them. `CLAUDE_CODE_OAUTH_TOKEN` setup tokens are unsupported and stripped. Subscription mode also strips `ANTHROPIC_API_KEY`, making the two billing/authentication paths mutually exclusive. Anthropic currently describes subscription Agent SDK usage as drawing from separate plan credit and applying current plan limits.
 
-Outreachr identifies the local subprocess as `outreachr/0.1.2` and disables built-in tools, plugins, skills, subagents, settings sources, filesystem additions, and persistent sessions. `strictMcpConfig` permits only Outreachr's authenticated loopback MCP server. The permission callback allows only exact `mcp__outreachr__…` names from the run allowlist and interrupts every other tool attempt. These restrictions are identical in API-key and approved-subscription modes, and authentication cannot change during an active run.
+Outreachr identifies the local subprocess as `outreachr/0.2.0` and disables built-in tools, plugins, skills, subagents, settings sources, filesystem additions, and persistent sessions. `strictMcpConfig` permits only Outreachr's authenticated loopback MCP server. The permission callback allows only exact `mcp__outreachr__…` names from the run allowlist and interrupts every other tool attempt. These restrictions are identical in API-key and approved-subscription modes, and authentication cannot change during an active run.
 
 Anthropic's product and legal guidance can change. Distributors must re-check the official authentication and Agent SDK terms before each release; this document is an implementation constraint, not legal advice.
 

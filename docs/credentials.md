@@ -1,6 +1,6 @@
-# Founder-owned connector credentials
+# User-owned connector credentials
 
-Outreachr has no shared cloud OAuth application. Each founder creates a public native-desktop client so the local app can request narrowly delegated access without any centrally controlled Outreachr credential. The Application/Client ID and Microsoft tenant are public configuration; an OAuth authorization code, access token, refresh token, client secret, or account password is not.
+Outreachr has no shared cloud OAuth application. Each user creates a public native-desktop client so the local app can request narrowly delegated access without any centrally controlled Outreachr credential. The Application/Client ID and Microsoft tenant are public configuration; an OAuth authorization code, access token, refresh token, client secret, or account password is not.
 
 Never paste a client secret or account password into Outreachr. The app has no field for either one. Authorization runs in the system browser with PKCE, and token exchange and storage stay in the Electron main process.
 
@@ -9,9 +9,9 @@ Never paste a client secret or account password into Outreachr. The app has no f
 1. [Create or select a Google Cloud project](https://console.cloud.google.com/projectcreate).
 2. In the [API Library](https://console.cloud.google.com/apis/library), enable **Gmail API** and **Google Calendar API**.
 3. Configure the [Google Auth Platform](https://console.cloud.google.com/auth/overview):
-   - complete Branding with an app name, founder support email, and developer contact;
+   - complete Branding with an app name, user support email, and developer contact;
    - under [Audience](https://console.cloud.google.com/auth/audience), choose Internal only for an eligible Google Workspace organization or External for a personal/outside account;
-   - when an External app remains in Testing, add the exact founder Google account as a test user;
+   - when an External app remains in Testing, add the exact user Google account as a test user;
    - under [Data Access](https://console.cloud.google.com/auth/scopes), declare the scopes listed below.
 4. Open [Google Auth Platform clients](https://console.cloud.google.com/auth/clients), create an OAuth client, and select **Desktop app**. Copy only the client ID. Google documents this client type in [Create access credentials](https://developers.google.com/workspace/guides/create-credentials#desktop-app) and the [native-app loopback flow](https://developers.google.com/identity/protocols/oauth2/native-app).
 5. In Outreachr, open **Settings → Mail & calendar → Google Workspace**, paste the client ID, choose whether to enable relationship sync, and select **Save and connect in browser**.
@@ -21,13 +21,13 @@ Never paste a client secret or account password into Outreachr. The app has no f
 Outreachr's minimum Google request is:
 
 - `openid` and `https://www.googleapis.com/auth/userinfo.email` to identify the connected account;
-- `https://www.googleapis.com/auth/gmail.send` for founder-approved mail;
+- `https://www.googleapis.com/auth/gmail.send` for user-approved mail;
 - `https://www.googleapis.com/auth/calendar.events.owned` and `https://www.googleapis.com/auth/calendar.events.freebusy` for owned-calendar events and free/busy access;
 - offline access so the local app can refresh an expired access token.
 
 Enabling **relationship sync** adds `https://www.googleapis.com/auth/gmail.readonly`. Outreachr uses it for header-only prior-contact, reply, bounce, complaint, and unsubscribe reconciliation; it discards bodies, attachments, and unrelated inbound messages. Research-only use can leave it off. Provider sending fails closed without a completed relationship sync.
 
-Google classifies some Gmail access as sensitive or restricted. A founder-owned, personal-use client may qualify for Google's verification exception, but it can still show an unverified-app warning and user cap. Google states that authorizations for an External app left in Testing expire after seven days; reconnecting weekly is therefore expected in that mode. Review the current [restricted-scope verification and exceptions](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) before changing the publishing status.
+Google classifies some Gmail access as sensitive or restricted. A user-owned, personal-use client may qualify for Google's verification exception, but it can still show an unverified-app warning and user cap. Google states that authorizations for an External app left in Testing expire after seven days; reconnecting weekly is therefore expected in that mode. Review the current [restricted-scope verification and exceptions](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) before changing the publishing status.
 
 ## Microsoft 365
 

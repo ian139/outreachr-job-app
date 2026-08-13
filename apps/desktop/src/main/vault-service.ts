@@ -56,8 +56,6 @@ import type {
   WorkItem,
 } from '../shared/contracts';
 
-const SEED_FILE_SHA256 = 'b120aeb6a71f201e6a4a3198e0b9a7eef45ff24b2c0b224b8e763fbea2caee23';
-const SEED_LOGICAL_DIGEST = 'e91f834c59b9d7fc0a679174513c9b44b228cc6925c3654443f1b534d1643899';
 const MAX_VAULT_OR_BACKUP_BYTES = 512 * 1024 * 1024;
 const MAX_SEED_IMPORT_BYTES = 256 * 1024 * 1024;
 const MAX_EXPORT_NAME_ATTEMPTS = 1_000;
@@ -620,38 +618,7 @@ export class VaultService {
     });
     this.#repository = new OutreachrRepository(this.#vault);
     backfillAuditChain(this.#vault);
-    if (!bytes) {
-      const seedBytes = await readBoundedFile(
-        join(this.#options.resourceDirectory, 'Outreachr_Investor_Seed.sqlite'),
-        MAX_SEED_IMPORT_BYTES,
-        'Seed',
-      );
-      const importedAt = this.#now().toISOString();
-      const result = importInvestorSeed(this.#vault.sqlite, this.#vault, seedBytes, {
-        importedAt,
-        expectedFileSha256: SEED_FILE_SHA256,
-        expectedLogicalDigest: SEED_LOGICAL_DIGEST,
-        allowUnsignedResearch: true,
-      });
-      appendAuditEntry(this.#vault, {
-        occurredAt: importedAt,
-        actorType: 'system',
-        action: 'seed.imported',
-        entityType: 'seed_package',
-        entityId: result.packageId,
-        detail: {
-          packageVersion: result.packageVersion,
-          logicalDigestSha256: result.logicalDigestSha256,
-          signatureStatus: result.signatureStatus,
-          counts: {
-            firms: result.firmCount,
-            people: result.personCount,
-            sources: result.sourceCount,
-          },
-        },
-      });
-    }
-    // Persist migrations, audit-chain backfills, and a first seed before the UI opens.
+    // Persist migrations and audit-chain backfills before the UI opens.
     await this.persist();
   }
 

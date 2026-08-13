@@ -18,15 +18,19 @@ export async function removeTemporaryDirectory(path: string): Promise<void> {
 export async function initializedVault(
   dataDirectory: string,
   now: () => Date = () => FIXED_NOW,
+  importSeed = true,
 ): Promise<VaultService> {
   const service = new VaultService({
-    appVersion: '0.1.0-test',
+    appVersion: '0.2.0-test',
     platform: process.platform,
     dataDirectory,
     resourceDirectory: RESOURCE_ROOT,
     now,
   });
   await service.initialize();
+  if (importSeed) {
+    await service.importSeedFile(join(RESOURCE_ROOT, 'Outreachr_Investor_Seed.sqlite'));
+  }
   return service;
 }
 

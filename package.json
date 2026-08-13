@@ -1,17 +1,17 @@
 {
   "name": "outreachr",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "A local-first job-application communication workspace.",
   "author": "Outreachr contributors",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lalalune/outreachr.git"
+    "url": "git+https://github.com/ian139/outreachr-job-app.git"
   },
-  "homepage": "https://github.com/lalalune/outreachr#readme",
+  "homepage": "https://github.com/ian139/outreachr-job-app#readme",
   "bugs": {
-    "url": "https://github.com/lalalune/outreachr/issues"
+    "url": "https://github.com/ian139/outreachr-job-app/issues"
   },
   "packageManager": "pnpm@11.18.0",
   "engines": {

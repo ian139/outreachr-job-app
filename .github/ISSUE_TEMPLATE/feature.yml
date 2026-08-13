@@ -1,20 +1,20 @@
 name: Feature proposal
-description: Propose a focused local-first fundraising workflow improvement.
+description: Propose a focused local-first job-application workflow improvement.
 title: '[Feature]: '
 labels: [enhancement]
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Founder problem
-      description: Describe the fundraising job and why the current workflow is insufficient.
+      label: User problem
+      description: Describe the job search task and why the current workflow is insufficient.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed behavior
-      description: Explain the local data, founder decision, and any external action boundary.
+      description: Explain the local data, user decision, and any external action boundary.
     validations:
       required: true
   - type: checkboxes
@@ -24,5 +24,5 @@ body:
       options:
         - label: The proposal can work without a hosted Outreachr account or mandatory paid service.
           required: true
-        - label: External actions remain explicit and founder-approved.
+        - label: External actions remain explicit and user-approved.
           required: true

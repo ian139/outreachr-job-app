@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Outreachr is for a solo founder or CEO running a US-focused pre-seed, seed, or Series A raise. They work under time pressure, move between research, introductions, direct outreach, meetings, diligence, and allocation, and need one trustworthy local system instead of a spreadsheet-and-inbox patchwork. The primary task on any screen is to decide and complete the safest, highest-leverage next action for the round.
+Outreachr is for a job seeker managing their job search and application communications. They work under time pressure, move between applications, companies, contacts, interviews, notes, tasks, and provider email threads, needing one trustworthy local system instead of a spreadsheet-and-inbox patchwork. The primary task on any screen is to decide and complete the safest, highest-leverage next action for their job search.
 
 ## Product Purpose
 
-Outreachr is a free, Apache-2.0, local-first Electron fundraising operating system. It joins an evidence-backed investor graph to a founder-controlled CRM, explains investor fit, preserves source history, coordinates warm paths and approved direct outreach, and keeps all private activity in a single local SQLite vault. Success means a founder can move from round definition to a prioritized, cited target list and a disciplined live process without a hosted account, mandatory paid service, or accidental spam.
+Outreachr is a free, Apache-2.0, local-first Electron job-application communication workspace. It joins job applications, companies, and contacts to a user-controlled workspace, coordinates application status and approved direct outreach, and keeps all private activity in a single local SQLite vault. Success means a user can track applications from initial submission through offer without a hosted account, mandatory paid service, or accidental spam.
 
 ## Brand Personality
 

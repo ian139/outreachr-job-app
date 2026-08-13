@@ -1,16 +1,14 @@
 # Outreachr user guide
 
-Outreachr is a single-founder, local-first fundraising workspace for pre-seed, seed, and Series A rounds. It does not create a hosted account. The canonical workspace is an SQLite file owned by the founder.
+Outreachr is a local-first job-application communication workspace. It does not create a hosted account. The canonical workspace is an SQLite file owned by the user.
 
 ## First launch
 
-1. Enter the founder and company identity.
-2. Define the round stage, target amount, useful check range, sectors, geographies, and narrative.
-3. Optionally enter the sender postal address now. Setup can finish without it, but email approval and sending remain blocked until it is saved under **Communication safety**.
-4. Outreachr imports the pinned investor research seed into a new private vault.
-5. Review **Up next** for the highest-priority local tasks and safety reviews.
-
-The bundled seed is explicitly marked research-grade. A source count is not proof of correctness. Exact claim sources retain their URLs, observation dates, confidence, and rights metadata; assertions without field-level evidence remain visibly unattributed instead of borrowing an unrelated entity source.
+1. Enter user identity and contact email.
+2. Define target job preferences, role titles, preferred locations, and narrative.
+3. Save postal address under **Communication safety** if sending emails.
+4. Outreachr initializes a private local workspace vault.
+5. Review **Up next** for the highest-priority local tasks and application reviews.
 
 ## Investor universe
 
@@ -102,4 +100,4 @@ Outreachr runs bundled local Codex and Claude agent sidecars. Codex uses the off
 
 ## Local deletion
 
-Settings → Privacy & security offers a typed-confirmation reset. The app writes a narrow reset marker, restarts, deletes only its exact SQLite vault, and creates a fresh seeded workspace. Create an encrypted backup first if the data may be needed.
+Settings → Privacy & security offers a typed-confirmation reset. The app writes a narrow reset marker, restarts, deletes only its exact SQLite vault, and creates a fresh workspace. Create an encrypted backup first if the data may be needed.

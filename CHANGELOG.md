@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0 - 2026-08-12
+
+- Completed local-first job-application communication workspace: applications, companies, contacts, stage history, notes, tasks, and provider thread inspection.
+- Provider-neutral `read-only` scope profile for Google desktop OAuth (`openid`, `userinfo.email`, `gmail.readonly`) preventing draft/send access when only inbox inspection is requested.
+- Explicit fail-closed Hosted Release policy: public release packaging requires Developer ID Application signing and notarization, refusing unsigned or downgraded release builds.
+- Cleanly removed automatic bundled investor seed dependency from job-workspace bootstrap and packaging while preserving upstream provenance and license metadata.
+- Updated canonical repository metadata and issue template pointers to `ian139/outreachr-job-app`.
+- Explicit non-goals: bulk spamming, autonomous sequence sending, storing passwords or unencrypted tokens, retaining mailbox bodies on disk.
+
 ## 0.1.2 - 2026-08-01
 
 - Added explicit founder-confirmed Claude subscription authentication for Anthropic-approved third-party deployments, using the official local Claude Code keychain/config session without copying or storing OAuth tokens.

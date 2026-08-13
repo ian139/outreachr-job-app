@@ -70,10 +70,10 @@ For a signed/notarized native-architecture build on a maintainer Mac, the local 
 - [ ] Create an annotated tag at protected `main`. A GitHub-verified SSH/GPG signature is a free defense-in-depth upgrade, but the baseline may use a protected unsigned annotated tag:
 
   ```bash
-  git tag -a v0.1.0 -m "Outreachr v0.1.0"
+  git tag -a v0.2.0 -m "Outreachr v0.2.0"
   # Stronger when a GitHub-recognized signing key is configured:
-  # git tag -s v0.1.0 -m "Outreachr v0.1.0"
-  git push origin v0.1.0
+  # git tag -s v0.2.0 -m "Outreachr v0.2.0"
+  git push origin v0.2.0
   ```
 
 - [ ] Confirm the preflight recorded the exact tag-verification status, proved the tag is protected and annotated, and proved it references current protected `main`.

@@ -43,11 +43,6 @@ for (const appArchive of appArchives) {
       throw new Error(`Packaged legal notice is missing or empty: ${target}`);
     }
   }
-  const sqliteResources = (await walkFiles(payloadRoot)).filter((file) =>
-    file.toLowerCase().endsWith('.sqlite'),
-  );
-  if (!sqliteResources.length)
-    throw new Error(`No SQLite investor seed was packaged under ${payloadRoot}`);
   const wasmPath = path.join(payloadRoot, 'sql-wasm.wasm');
   if (!(await exists(wasmPath)) || !WebAssembly.validate(await fs.readFile(wasmPath))) {
     throw new Error(`A valid sql.js WASM runtime was not packaged at ${wasmPath}`);

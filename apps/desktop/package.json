@@ -1,14 +1,14 @@
 {
   "name": "@outreachr/desktop",
   "desktopName": "outreachr.desktop",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Local-first job-application communication workspace",
   "author": "Outreachr contributors",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lalalune/outreachr.git"
+    "url": "git+https://github.com/ian139/outreachr-job-app.git"
   },
   "type": "module",
   "main": "./out/main/index.js",

@@ -48,7 +48,7 @@ providers; they require no production credentials and perform no live send.
 
 ## Install or build
 
-No packaged release is published for this fork. Build the current source locally:
+Download a signed release artifact from [GitHub Releases](https://github.com/ian139/outreachr-job-app/releases) or build the current source locally:
 
 To run from source:
 

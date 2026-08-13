@@ -3,7 +3,7 @@ import { readFile, readdir, stat, truncate, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEncryptedBackup, restoreEncryptedBackup } from '@outreachr/core';
-import type { VaultService } from '../../src/main/vault-service';
+import { VaultService } from '../../src/main/vault-service';
 import {
   RESOURCE_ROOT,
   firstPersonWithoutEmail,
@@ -58,6 +58,25 @@ describe('VaultService with the production investor seed', () => {
     await Promise.all(directories.splice(0).map(removeTemporaryDirectory));
   });
 
+  it('initializes a clean workspace without automatically importing investor seed', async () => {
+    const dir = await temporaryDirectory('clean-vault');
+    directories.push(dir);
+    const service = new VaultService({
+      appVersion: '0.2.0-test',
+      platform: process.platform,
+      dataDirectory: dir,
+      resourceDirectory: RESOURCE_ROOT,
+    });
+    services.push(service);
+    await service.initialize();
+    const bootstrap = await service.bootstrap();
+
+    expect(service.integrityCheck()).toEqual({ ok: true, messages: ['ok'] });
+    expect(bootstrap.seedVersion).toBe('not imported');
+    expect(bootstrap.investors).toHaveLength(0);
+    expect(bootstrap.people).toHaveLength(0);
+  });
+
   it('pins, imports, and persists the complete production seed in an isolated vault', async () => {
     const seedBytes = await readFile(`${RESOURCE_ROOT}/Outreachr_Investor_Seed.sqlite`);
     expect(createHash('sha256').update(seedBytes).digest('hex')).toBe(PINNED_FILE_DIGEST);
@@ -67,7 +86,7 @@ describe('VaultService with the production investor seed', () => {
 
     expect(service.integrityCheck()).toEqual({ ok: true, messages: ['ok'] });
     expect(bootstrap).toMatchObject({
-      appVersion: '0.1.0-test',
+      appVersion: '0.2.0-test',
       isFirstRun: true,
       seedVersion: '0.1.1',
       seedSignatureStatus: 'pinned unsigned research',
