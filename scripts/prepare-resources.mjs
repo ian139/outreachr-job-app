@@ -37,7 +37,6 @@ await generateThirdPartyNotices();
 await validateLegalNotices();
 await fs.rm(generatedRoot, { recursive: true, force: true });
 await fs.mkdir(generatedRoot, { recursive: true });
-await copyTree(sourceResources, generatedRoot);
 await prepareSqliteWasm();
 
 const sidecars = [];

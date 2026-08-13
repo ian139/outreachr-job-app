@@ -56,8 +56,8 @@ export function OnboardingFlow(): React.JSX.Element {
       await command('onboarding.complete', form);
       notify({
         tone: 'success',
-        title: 'Your local round is ready',
-        detail: 'Pinned research seed validated and imported.',
+        title: 'Your local workspace is ready',
+        detail: 'Private SQLite vault initialized.',
       });
     } finally {
       setSaving(false);
@@ -72,10 +72,10 @@ export function OnboardingFlow(): React.JSX.Element {
           <strong>Outreachr</strong>
         </div>
         <div className="onboarding-aside__copy">
-          <Badge tone="accent">Local-first fundraising</Badge>
+          <Badge tone="accent">Local-first workspace</Badge>
           <h1>Begin with a trustworthy round brief.</h1>
           <p>
-            Outreachr imports the public investor seed, keeps private activity in one local SQLite
+            Outreachr initializes your private workspace, keeps private activity in one local SQLite
             vault, and asks before any external action.
           </p>
         </div>
@@ -99,10 +99,8 @@ export function OnboardingFlow(): React.JSX.Element {
         <div className="onboarding-local">
           <Database aria-hidden="true" />
           <span>
-            <strong>{data?.seedVersion ?? 'Seed'} ready</strong>
-            <small>
-              {data?.counts.firms ?? 192} firms · {data?.counts.people ?? 192} people
-            </small>
+            <strong>Vault ready</strong>
+            <small>Local SQLite storage</small>
           </span>
         </div>
       </aside>
@@ -319,8 +317,8 @@ export function OnboardingFlow(): React.JSX.Element {
                 <span>Ready</span>
                 <h2>Your local workspace is ready to build.</h2>
                 <p>
-                  Outreachr will create the vault, validate and import the research-grade seed, and
-                  open a cited work queue. Public facts still require founder review before use.
+                  Outreachr will create the vault and open your workspace queue. All local data
+                  stays on this device.
                 </p>
               </header>
               <div className="ready-summary">
