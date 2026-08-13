@@ -19,11 +19,30 @@ import {
 
 export function parseSmokeArgs(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  if (args.dmg && args.zip) {
+
+  let kind = args.kind;
+  let dmgPath;
+  let zipPath;
+
+  if (typeof args.dmg === 'string') {
+    dmgPath = path.resolve(args.dmg);
+    if (!kind) kind = 'dmg';
+  }
+  if (typeof args.zip === 'string') {
+    zipPath = path.resolve(args.zip);
+    if (!kind) kind = 'zip';
+  }
+
+  if (args.dmg === true && args.zip === true) {
     throw new Error('Cannot specify both --dmg and --zip flags.');
   }
-  const kind = args.kind ?? (args.dmg ? 'dmg' : args.zip ? 'zip' : undefined);
-  if (kind && !['dmg', 'zip'].includes(kind)) {
+
+  if (!kind) {
+    if (args.dmg === true) kind = 'dmg';
+    else if (args.zip === true) kind = 'zip';
+  }
+
+  if (kind && !['dmg', 'zip', 'nsis', 'appimage', 'deb'].includes(kind.toLowerCase())) {
     throw new Error(`Invalid distribution kind "${kind}". Expected "dmg" or "zip".`);
   }
   const arch = args.arch ?? args.architecture;
@@ -40,41 +59,35 @@ export function parseSmokeArgs(argv = process.argv.slice(2)) {
   return {
     releaseDir,
     timeoutMs,
-    kind,
+    kind: kind?.toLowerCase(),
     arch,
+    dmgPath,
+    zipPath,
   };
 }
 
-export async function runPackagedSmoke(options = parseSmokeArgs()) {
-  const { releaseDir, timeoutMs, kind, arch } = options;
-  const stageKinds =
-    process.platform === 'darwin'
-      ? kind
-        ? [kind]
-        : ['dmg', 'zip']
-      : [kind];
-
-  for (const stageKind of stageKinds) {
-    const distributions = await stageDistributions(releaseDir, { kind: stageKind, arch });
-    let smokeError;
-    try {
-      for (const distribution of distributions) {
-        await smokeDistribution(distribution, timeoutMs);
-      }
-    } catch (error) {
-      smokeError = error;
+export async function runPackagedSmoke(options = parseSmokeArgs(), deps = {}) {
+  const { timeoutMs } = options;
+  const distributions = await stageDistributions(options.releaseDir, options, deps);
+  let smokeError;
+  try {
+    for (const distribution of distributions) {
+      await smokeDistribution(distribution, timeoutMs, deps);
     }
-    const cleanupErrors = await cleanupDistributions(distributions);
-    if (smokeError) throwWithCleanup(smokeError, cleanupErrors, 'Packaged application smoke');
-    throwCleanupErrors(cleanupErrors, 'Packaged application smoke');
+  } catch (error) {
+    smokeError = error;
   }
+  const cleanupErrors = await cleanupDistributions(distributions, deps);
+  if (smokeError) throwWithCleanup(smokeError, cleanupErrors, 'Packaged application smoke');
+  throwCleanupErrors(cleanupErrors, 'Packaged application smoke');
 }
 
-export async function executableArchitecture(executable) {
+export async function executableArchitecture(executable, deps = {}) {
   if (process.platform !== 'darwin') return [];
+  const runCmd = deps.run ?? run;
   try {
-    const lipoResult = await run('lipo', ['-info', executable], { allowFailure: true });
-    if (lipoResult.code === 0) {
+    const lipoResult = await runCmd('lipo', ['-info', executable], { allowFailure: true });
+    if (lipoResult && lipoResult.code === 0) {
       const output = lipoResult.stdout;
       const archs = [];
       if (output.includes('x86_64')) archs.push('x64');
@@ -87,26 +100,34 @@ export async function executableArchitecture(executable) {
   return [];
 }
 
-export async function smokeDistribution(distribution, timeout) {
-  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-smoke-profile-'));
+export async function smokeDistribution(distribution, timeout, deps = {}) {
+  const fileSystem = deps.fs ?? fs;
+  const remTree = deps.removeTree ?? removeTree;
+  const profile = await (deps.mkdtemp ?? fileSystem.mkdtemp)(
+    path.join(os.tmpdir(), 'outreachr-smoke-profile-'),
+  );
   let smokeError;
   let child1;
   let child2;
   try {
     // Session 1: Launch, setup workspace, create company and application record
-    const debuggingPort1 = await availablePort();
+    const debuggingPort1 = await (deps.availablePort ?? availablePort)();
     console.log(
       `Launching final ${distribution.kind} distribution (Session 1 - Creation): ${distribution.executable}`,
     );
     let stdout1 = '';
     let stderr1 = '';
-    child1 = spawnProcess(distribution, profile, debuggingPort1);
-    child1.stdout.on('data', (chunk) => {
-      stdout1 = `${stdout1}${chunk}`.slice(-40_000);
-    });
-    child1.stderr.on('data', (chunk) => {
-      stderr1 = `${stderr1}${chunk}`.slice(-40_000);
-    });
+    child1 = (deps.spawnProcess ?? spawnProcess)(distribution, profile, debuggingPort1, deps);
+    if (child1.stdout) {
+      child1.stdout.on('data', (chunk) => {
+        stdout1 = `${stdout1}${chunk}`.slice(-40_000);
+      });
+    }
+    if (child1.stderr) {
+      child1.stderr.on('data', (chunk) => {
+        stderr1 = `${stderr1}${chunk}`.slice(-40_000);
+      });
+    }
 
     const earlyExit1 = new Promise((_, reject) => {
       child1.once('error', reject);
@@ -120,11 +141,11 @@ export async function smokeDistribution(distribution, timeout) {
     });
 
     const renderer1 = await Promise.race([
-      waitForRendererReadiness(debuggingPort1, timeout),
+      (deps.waitForRendererReadiness ?? waitForRendererReadiness)(debuggingPort1, timeout, deps),
       earlyExit1,
     ]);
 
-    if (child1.exitCode !== null) {
+    if (child1.exitCode !== null && child1.exitCode !== undefined) {
       throw new Error('Session 1 application exited immediately after readiness');
     }
 
@@ -140,7 +161,14 @@ export async function smokeDistribution(distribution, timeout) {
     );
 
     // Drive job application creation in Session 1
-    const createdRecord = await driveJobApplicationCreation(debuggingPort1);
+    const createdRecord = await (deps.driveJobApplicationCreation ?? driveJobApplicationCreation)(
+      debuggingPort1,
+      deps,
+    );
+    if (!createdRecord || !createdRecord.applicationId) {
+      throw new Error('Session 1 job application creation failed to return valid record details');
+    }
+
     console.log(
       JSON.stringify({
         event: 'application-created',
@@ -152,23 +180,27 @@ export async function smokeDistribution(distribution, timeout) {
     );
 
     // Gracefully shutdown Session 1 process
-    await terminateTree(child1.pid);
+    await (deps.terminateTree ?? terminateTree)(child1.pid);
     child1 = null;
 
     // Session 2: Relaunch same profile, verify persisted application record
-    const debuggingPort2 = await availablePort();
+    const debuggingPort2 = await (deps.availablePort ?? availablePort)();
     console.log(
       `Relaunching final ${distribution.kind} distribution (Session 2 - Persistence Check): ${distribution.executable}`,
     );
     let stdout2 = '';
     let stderr2 = '';
-    child2 = spawnProcess(distribution, profile, debuggingPort2);
-    child2.stdout.on('data', (chunk) => {
-      stdout2 = `${stdout2}${chunk}`.slice(-40_000);
-    });
-    child2.stderr.on('data', (chunk) => {
-      stderr2 = `${stderr2}${chunk}`.slice(-40_000);
-    });
+    child2 = (deps.spawnProcess ?? spawnProcess)(distribution, profile, debuggingPort2, deps);
+    if (child2.stdout) {
+      child2.stdout.on('data', (chunk) => {
+        stdout2 = `${stdout2}${chunk}`.slice(-40_000);
+      });
+    }
+    if (child2.stderr) {
+      child2.stderr.on('data', (chunk) => {
+        stderr2 = `${stderr2}${chunk}`.slice(-40_000);
+      });
+    }
 
     const earlyExit2 = new Promise((_, reject) => {
       child2.once('error', reject);
@@ -182,19 +214,28 @@ export async function smokeDistribution(distribution, timeout) {
     });
 
     const renderer2 = await Promise.race([
-      waitForRendererReadiness(debuggingPort2, timeout),
+      (deps.waitForRendererReadiness ?? waitForRendererReadiness)(debuggingPort2, timeout, deps),
       earlyExit2,
     ]);
 
-    if (child2.exitCode !== null) {
+    if (child2.exitCode !== null && child2.exitCode !== undefined) {
       throw new Error('Session 2 application exited immediately after readiness');
     }
 
     // Drive application persistence verification in Session 2
-    const persistenceResult = await driveJobApplicationPersistenceCheck(
-      debuggingPort2,
-      createdRecord.applicationId,
-    );
+    const persistenceResult = await (
+      deps.driveJobApplicationPersistenceCheck ?? driveJobApplicationPersistenceCheck
+    )(debuggingPort2, createdRecord.applicationId, deps);
+
+    if (
+      !persistenceResult ||
+      !persistenceResult.verified ||
+      persistenceResult.applicationId !== createdRecord.applicationId
+    ) {
+      throw new Error(
+        `Session 2 persistence verification failed for application ${createdRecord.applicationId}`,
+      );
+    }
 
     console.log(
       JSON.stringify({
@@ -206,7 +247,7 @@ export async function smokeDistribution(distribution, timeout) {
       }),
     );
 
-    await terminateTree(child2.pid);
+    await (deps.terminateTree ?? terminateTree)(child2.pid);
     child2 = null;
   } catch (error) {
     smokeError = new Error(
@@ -217,20 +258,21 @@ export async function smokeDistribution(distribution, timeout) {
 
   const cleanupErrors = await collectCleanupErrors([
     async () => {
-      if (child1?.pid) await terminateTree(child1.pid);
+      if (child1?.pid) await (deps.terminateTree ?? terminateTree)(child1.pid);
     },
     async () => {
-      if (child2?.pid) await terminateTree(child2.pid);
+      if (child2?.pid) await (deps.terminateTree ?? terminateTree)(child2.pid);
     },
-    () => removeTree(profile),
+    () => remTree(profile),
   ]);
 
   if (smokeError) throwWithCleanup(smokeError, cleanupErrors, `${distribution.kind} smoke`);
   throwCleanupErrors(cleanupErrors, `${distribution.kind} smoke`);
 }
 
-function spawnProcess(distribution, profile, debuggingPort) {
-  const child = spawn(
+export function spawnProcess(distribution, profile, debuggingPort, deps = {}) {
+  const spawnFn = deps.spawn ?? spawn;
+  const child = spawnFn(
     distribution.executable,
     [
       `--user-data-dir=${profile}`,
@@ -252,13 +294,16 @@ function spawnProcess(distribution, profile, debuggingPort) {
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
+  if (child.stdout) child.stdout.setEncoding('utf8');
+  if (child.stderr) child.stderr.setEncoding('utf8');
   return child;
 }
 
-export async function driveJobApplicationCreation(debuggingPort) {
-  const targets = await getDevToolsTargets(debuggingPort);
+export async function driveJobApplicationCreation(debuggingPort, deps = {}) {
+  if (deps.driveJobApplicationCreation) {
+    return await deps.driveJobApplicationCreation(debuggingPort, deps);
+  }
+  const targets = await (deps.getDevToolsTargets ?? getDevToolsTargets)(debuggingPort, deps);
   const pageTarget = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
   if (!pageTarget) throw new Error('No page target available for CDP evaluation');
 
@@ -295,11 +340,18 @@ export async function driveJobApplicationCreation(debuggingPort) {
     };
   })()`;
 
-  return await evaluateCDP(pageTarget.webSocketDebuggerUrl, expression);
+  return await (deps.evaluateCDP ?? evaluateCDP)(pageTarget.webSocketDebuggerUrl, expression, deps);
 }
 
-export async function driveJobApplicationPersistenceCheck(debuggingPort, expectedApplicationId) {
-  const targets = await getDevToolsTargets(debuggingPort);
+export async function driveJobApplicationPersistenceCheck(
+  debuggingPort,
+  expectedApplicationId,
+  deps = {},
+) {
+  if (deps.driveJobApplicationPersistenceCheck) {
+    return await deps.driveJobApplicationPersistenceCheck(debuggingPort, expectedApplicationId, deps);
+  }
+  const targets = await (deps.getDevToolsTargets ?? getDevToolsTargets)(debuggingPort, deps);
   const pageTarget = targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
   if (!pageTarget) throw new Error('No page target available for CDP evaluation');
 
@@ -323,52 +375,91 @@ export async function driveJobApplicationPersistenceCheck(debuggingPort, expecte
     };
   })()`;
 
-  return await evaluateCDP(pageTarget.webSocketDebuggerUrl, expression);
+  return await (deps.evaluateCDP ?? evaluateCDP)(pageTarget.webSocketDebuggerUrl, expression, deps);
 }
 
-export async function stageDistributions(root, options = {}) {
+export async function stageDistributions(root, options = {}, deps = {}) {
   const requestedKind = typeof options === 'string' ? options : options.kind;
   const requestedArch = typeof options === 'object' ? options.arch : undefined;
-  const files = await walkFiles(root);
+  const explicitDmgPath = typeof options === 'object' ? options.dmgPath : undefined;
+  const explicitZipPath = typeof options === 'object' ? options.zipPath : undefined;
+
+  const walk = deps.walkFiles ?? walkFiles;
+  const runCmd = deps.run ?? run;
+  const runExe = deps.runExecutable ?? runExecutable;
+  const getArch = deps.executableArchitecture ?? executableArchitecture;
+  const verifyBundle = deps.verifyMacAppBundle ?? verifyMacAppBundle;
+  const findUniqueAppExec = deps.uniqueAppExecutable ?? uniqueAppExecutable;
+  const fileSystem = deps.fs ?? fs;
+  const remTree = deps.removeTree ?? removeTree;
+
+  const files = await walk(root);
   const staged = [];
+
   try {
     if (process.platform === 'darwin') {
-      const dmgs = files.filter((file) => file.toLowerCase().endsWith('.dmg'));
-      const zips = files.filter((file) => file.toLowerCase().endsWith('.zip'));
-      if (dmgs.length !== 1 || zips.length !== 1) {
-        throw new Error(
-          `Expected one DMG and one ZIP under ${root}; found ${dmgs.length}/${zips.length}`,
+      const stageKinds = requestedKind
+        ? [requestedKind]
+        : explicitDmgPath
+          ? ['dmg']
+          : explicitZipPath
+            ? ['zip']
+            : ['dmg', 'zip'];
+
+      if (stageKinds.includes('dmg')) {
+        let dmgFile = explicitDmgPath;
+        if (!dmgFile) {
+          let dmgs = files.filter((file) => file.toLowerCase().endsWith('.dmg'));
+          if (requestedArch) {
+            const archDmgs = dmgs.filter((file) =>
+              path.basename(file).toLowerCase().includes(requestedArch.toLowerCase()),
+            );
+            if (archDmgs.length > 0) dmgs = archDmgs;
+          }
+          if (dmgs.length === 0) {
+            throw new Error(`No DMG distribution found under ${root}`);
+          }
+          if (dmgs.length > 1) {
+            throw new Error(
+              `Expected exactly one DMG distribution under ${root}${requestedArch ? ` for arch ${requestedArch}` : ''}; found ${dmgs.length} (${dmgs.map((f) => path.basename(f)).join(', ')}). Specify --arch or explicit --dmg <path>.`,
+            );
+          }
+          dmgFile = dmgs[0];
+        }
+
+        const mountpoint = await (deps.mkdtemp ?? fileSystem.mkdtemp)(
+          path.join(os.tmpdir(), 'outreachr-dmg-'),
         );
-      }
-      if (requestedKind !== 'zip') {
-        const mountpoint = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-dmg-'));
-        const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-dmg-install-'));
+        const installRoot = await (deps.mkdtemp ?? fileSystem.mkdtemp)(
+          path.join(os.tmpdir(), 'outreachr-dmg-install-'),
+        );
         let mounted = false;
         try {
-          await run(
+          await runCmd(
             'hdiutil',
-            ['attach', '-nobrowse', '-readonly', '-mountpoint', mountpoint, dmgs[0]],
-            {
-              capture: false,
-              timeoutMs: 60_000,
-            },
+            ['attach', '-nobrowse', '-readonly', '-mountpoint', mountpoint, dmgFile],
+            { capture: false, timeoutMs: 60_000 },
           );
           mounted = true;
-          const mountedExecutable = await uniqueAppExecutable(mountpoint, 'mounted DMG');
+          const mountedExecutable = await findUniqueAppExec(mountpoint, 'mounted DMG', deps);
           const mountedBundle = appBundleForExecutable(mountedExecutable);
           const installedBundle = path.join(installRoot, path.basename(mountedBundle));
-          await run('ditto', [mountedBundle, installedBundle], {
+          await runCmd('ditto', [mountedBundle, installedBundle], {
             capture: false,
             timeoutMs: 120_000,
           });
-          await run('hdiutil', ['detach', mountpoint, '-force']);
+          await runCmd('hdiutil', ['detach', mountpoint, '-force']);
           mounted = false;
-          await removeTree(mountpoint);
-          const installedExecutable = await uniqueAppExecutable(installRoot, 'DMG installation');
-          await verifyMacAppBundle(installedExecutable, 'DMG installation');
+          await remTree(mountpoint);
+          const installedExecutable = await findUniqueAppExec(
+            installRoot,
+            'DMG installation',
+            deps,
+          );
+          await verifyBundle(installedExecutable, 'DMG installation', deps);
 
           if (requestedArch) {
-            const archs = await executableArchitecture(installedExecutable);
+            const archs = await getArch(installedExecutable, deps);
             if (archs.length > 0 && !archs.includes(requestedArch)) {
               throw new Error(
                 `DMG executable architecture (${archs.join(',')}) does not match requested architecture ${requestedArch}`,
@@ -381,34 +472,60 @@ export async function stageDistributions(root, options = {}) {
             executable: installedExecutable,
             environment: {},
             async cleanup() {
-              await removeTree(installRoot);
+              await remTree(installRoot);
             },
           });
         } catch (error) {
           const cleanups = [];
           if (mounted) {
-            cleanups.push(() => run('hdiutil', ['detach', mountpoint, '-force']));
+            cleanups.push(() => runCmd('hdiutil', ['detach', mountpoint, '-force']));
           }
           cleanups.push(
-            () => removeTree(mountpoint),
-            () => removeTree(installRoot),
+            () => remTree(mountpoint),
+            () => remTree(installRoot),
           );
-          throwWithCleanup(error, await collectCleanupErrors(cleanups), 'DMG distribution staging');
+          throwWithCleanup(
+            error,
+            await collectCleanupErrors(cleanups),
+            'DMG distribution staging',
+          );
         }
       }
 
-      if (requestedKind !== 'dmg') {
-        const zipRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-zip-'));
+      if (stageKinds.includes('zip')) {
+        let zipFile = explicitZipPath;
+        if (!zipFile) {
+          let zips = files.filter((file) => file.toLowerCase().endsWith('.zip'));
+          if (requestedArch) {
+            const archZips = zips.filter((file) =>
+              path.basename(file).toLowerCase().includes(requestedArch.toLowerCase()),
+            );
+            if (archZips.length > 0) zips = archZips;
+          }
+          if (zips.length === 0) {
+            throw new Error(`No ZIP distribution found under ${root}`);
+          }
+          if (zips.length > 1) {
+            throw new Error(
+              `Expected exactly one ZIP distribution under ${root}${requestedArch ? ` for arch ${requestedArch}` : ''}; found ${zips.length} (${zips.map((f) => path.basename(f)).join(', ')}). Specify --arch or explicit --zip <path>.`,
+            );
+          }
+          zipFile = zips[0];
+        }
+
+        const zipRoot = await (deps.mkdtemp ?? fileSystem.mkdtemp)(
+          path.join(os.tmpdir(), 'outreachr-zip-'),
+        );
         try {
-          await run('ditto', ['-x', '-k', zips[0], zipRoot], {
+          await runCmd('ditto', ['-x', '-k', zipFile, zipRoot], {
             capture: false,
             timeoutMs: 60_000,
           });
-          const zippedExecutable = await uniqueAppExecutable(zipRoot, 'release ZIP');
-          await verifyMacAppBundle(zippedExecutable, 'release ZIP');
+          const zippedExecutable = await findUniqueAppExec(zipRoot, 'release ZIP', deps);
+          await verifyBundle(zippedExecutable, 'release ZIP', deps);
 
           if (requestedArch) {
-            const archs = await executableArchitecture(zippedExecutable);
+            const archs = await getArch(zippedExecutable, deps);
             if (archs.length > 0 && !archs.includes(requestedArch)) {
               throw new Error(
                 `ZIP executable architecture (${archs.join(',')}) does not match requested architecture ${requestedArch}`,
@@ -421,13 +538,13 @@ export async function stageDistributions(root, options = {}) {
             executable: zippedExecutable,
             environment: {},
             async cleanup() {
-              await removeTree(zipRoot);
+              await remTree(zipRoot);
             },
           });
         } catch (error) {
           throwWithCleanup(
             error,
-            await collectCleanupErrors([() => removeTree(zipRoot)]),
+            await collectCleanupErrors([() => remTree(zipRoot)]),
             'ZIP distribution staging',
           );
         }
@@ -436,24 +553,32 @@ export async function stageDistributions(root, options = {}) {
     }
 
     if (process.platform === 'win32') {
-      const installers = files.filter(
+      let installers = files.filter(
         (file) =>
           file.toLowerCase().endsWith('.exe') &&
           path.basename(file).toLowerCase().startsWith('outreachr-') &&
           !file.toLowerCase().includes('unpacked'),
       );
+      if (requestedArch) {
+        const archInstallers = installers.filter((file) =>
+          path.basename(file).toLowerCase().includes(requestedArch.toLowerCase()),
+        );
+        if (archInstallers.length > 0) installers = archInstallers;
+      }
       if (installers.length !== 1) {
         throw new Error(
           `Expected one final NSIS installer under ${root}, found ${installers.length}`,
         );
       }
-      const installRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-nsis-'));
+      const installRoot = await (deps.mkdtemp ?? fileSystem.mkdtemp)(
+        path.join(os.tmpdir(), 'outreachr-nsis-'),
+      );
       try {
-        await runExecutable(installers[0], ['/S', `/D=${installRoot}`], {
+        await runExe(installers[0], ['/S', `/D=${installRoot}`], {
           capture: false,
           timeoutMs: 120_000,
         });
-        const installed = (await walkFiles(installRoot)).filter(
+        const installed = (await walk(installRoot)).filter(
           (file) => path.basename(file).toLowerCase() === 'outreachr.exe',
         );
         if (installed.length !== 1) {
@@ -463,12 +588,12 @@ export async function stageDistributions(root, options = {}) {
           kind: 'NSIS installer',
           executable: installed[0],
           environment: {},
-          cleanup: () => cleanupNsis(installRoot),
+          cleanup: () => cleanupNsis(installRoot, deps),
         });
       } catch (error) {
         throwWithCleanup(
           error,
-          await collectCleanupErrors([() => cleanupNsis(installRoot)]),
+          await collectCleanupErrors([() => cleanupNsis(installRoot, deps)]),
           'NSIS distribution staging',
         );
       }
@@ -476,97 +601,119 @@ export async function stageDistributions(root, options = {}) {
     }
 
     if (process.platform === 'linux') {
-      const appImages = files.filter((file) => file.toLowerCase().endsWith('.appimage'));
-      const debs = files.filter((file) => file.toLowerCase().endsWith('.deb'));
-      if (appImages.length !== 1 || debs.length !== 1) {
-        throw new Error(
-          `Expected one AppImage and one deb under ${root}; found ${appImages.length}/${debs.length}`,
-        );
-      }
-      await fs.chmod(appImages[0], 0o755);
-      staged.push({
-        kind: 'AppImage',
-        executable: appImages[0],
-        environment: { APPIMAGE_EXTRACT_AND_RUN: '1' },
-        async cleanup() {},
-      });
+      const stageKinds = requestedKind ? [requestedKind] : ['appimage', 'deb'];
 
-      await run('dpkg-deb', ['--info', debs[0]], { capture: false });
-      const packageName = (await run('dpkg-deb', ['--field', debs[0], 'Package'])).stdout.trim();
-      if (!/^[a-z0-9][a-z0-9+.-]+$/.test(packageName)) {
-        throw new Error(`Invalid deb package name: ${packageName}`);
-      }
-      const priorPackageStatus = await debPackageStatus(packageName);
-      if (priorPackageStatus !== null) {
-        throw new Error(
-          `Refusing to replace an existing ${packageName} package (${priorPackageStatus})`,
-        );
-      }
-      if (await pathEntryExists('/usr/bin/outreachr')) {
-        throw new Error('Refusing to replace an existing /usr/bin/outreachr entry');
-      }
-      try {
-        await run('sudo', ['apt-get', 'install', '--yes', '--no-install-recommends', debs[0]], {
-          capture: false,
-          timeoutMs: 120_000,
+      if (stageKinds.includes('appimage')) {
+        let appImages = files.filter((file) => file.toLowerCase().endsWith('.appimage'));
+        if (requestedArch) {
+          const archAppImages = appImages.filter((file) =>
+            path.basename(file).toLowerCase().includes(requestedArch.toLowerCase()),
+          );
+          if (archAppImages.length > 0) appImages = archAppImages;
+        }
+        if (appImages.length !== 1) {
+          throw new Error(`Expected one AppImage under ${root}, found ${appImages.length}`);
+        }
+        await fileSystem.chmod(appImages[0], 0o755);
+        staged.push({
+          kind: 'AppImage',
+          executable: appImages[0],
+          environment: { APPIMAGE_EXTRACT_AND_RUN: '1' },
+          async cleanup() {},
         });
-        const installedFiles = (await run('dpkg', ['--listfiles', packageName])).stdout
-          .split(/\r?\n/)
-          .filter(Boolean);
-        const installedExecutable = '/opt/Outreachr/outreachr';
-        if (!installedFiles.includes(installedExecutable)) {
-          throw new Error(`Installed deb does not contain ${installedExecutable}`);
+      }
+
+      if (stageKinds.includes('deb')) {
+        let debs = files.filter((file) => file.toLowerCase().endsWith('.deb'));
+        if (requestedArch) {
+          const archDebs = debs.filter((file) =>
+            path.basename(file).toLowerCase().includes(requestedArch.toLowerCase()),
+          );
+          if (archDebs.length > 0) debs = archDebs;
         }
-        const executableStat = await fs.lstat(installedExecutable);
-        if (!executableStat.isFile() || (executableStat.mode & 0o111) === 0) {
-          throw new Error(`Installed deb executable is not runnable: ${installedExecutable}`);
+        if (debs.length !== 1) {
+          throw new Error(`Expected one deb under ${root}, found ${debs.length}`);
         }
-        const desktopEntryPath = '/usr/share/applications/outreachr.desktop';
-        if (!installedFiles.includes(desktopEntryPath)) {
-          throw new Error(`Installed deb does not contain ${desktopEntryPath}`);
+        await runCmd('dpkg-deb', ['--info', debs[0]], { capture: false });
+        const packageName = (
+          await runCmd('dpkg-deb', ['--field', debs[0], 'Package'])
+        ).stdout.trim();
+        if (!/^[a-z0-9][a-z0-9+.-]+$/.test(packageName)) {
+          throw new Error(`Invalid deb package name: ${packageName}`);
         }
-        const desktopEntry = await fs.readFile(desktopEntryPath, 'utf8');
-        if (!/^StartupWMClass=outreachr$/m.test(desktopEntry)) {
-          throw new Error('Installed desktop entry does not match the Electron app identity');
-        }
-        if (!/^Icon=outreachr$/m.test(desktopEntry)) {
-          throw new Error('Installed desktop entry does not use the packaged Outreachr icon');
-        }
-        const desktopExec = /^Exec=(.+)$/m.exec(desktopEntry)?.[1];
-        if (desktopExec !== `${installedExecutable} %U`) {
+        const priorPackageStatus = await debPackageStatus(packageName, deps);
+        if (priorPackageStatus !== null) {
           throw new Error(
-            'Installed desktop entry does not launch the packaged Outreachr executable',
+            `Refusing to replace an existing ${packageName} package (${priorPackageStatus})`,
           );
         }
-        staged.push({
-          kind: 'deb',
-          executable: installedExecutable,
-          environment: {},
-          cleanup: () => cleanupDeb(packageName),
-        });
-      } catch (error) {
-        throwWithCleanup(
-          error,
-          await collectCleanupErrors([() => cleanupDeb(packageName)]),
-          'Debian package staging',
-        );
+        if (await pathEntryExists('/usr/bin/outreachr', deps)) {
+          throw new Error('Refusing to replace an existing /usr/bin/outreachr entry');
+        }
+        try {
+          await runCmd('sudo', ['apt-get', 'install', '--yes', '--no-install-recommends', debs[0]], {
+            capture: false,
+            timeoutMs: 120_000,
+          });
+          const installedFiles = (await runCmd('dpkg', ['--listfiles', packageName])).stdout
+            .split(/\r?\n/)
+            .filter(Boolean);
+          const installedExecutable = '/opt/Outreachr/outreachr';
+          if (!installedFiles.includes(installedExecutable)) {
+            throw new Error(`Installed deb does not contain ${installedExecutable}`);
+          }
+          const executableStat = await fileSystem.lstat(installedExecutable);
+          if (!executableStat.isFile() || (executableStat.mode & 0o111) === 0) {
+            throw new Error(`Installed deb executable is not runnable: ${installedExecutable}`);
+          }
+          const desktopEntryPath = '/usr/share/applications/outreachr.desktop';
+          if (!installedFiles.includes(desktopEntryPath)) {
+            throw new Error(`Installed deb does not contain ${desktopEntryPath}`);
+          }
+          const desktopEntry = await fileSystem.readFile(desktopEntryPath, 'utf8');
+          if (!/^StartupWMClass=outreachr$/m.test(desktopEntry)) {
+            throw new Error('Installed desktop entry does not match the Electron app identity');
+          }
+          if (!/^Icon=outreachr$/m.test(desktopEntry)) {
+            throw new Error('Installed desktop entry does not use the packaged Outreachr icon');
+          }
+          const desktopExec = /^Exec=(.+)$/m.exec(desktopEntry)?.[1];
+          if (desktopExec !== `${installedExecutable} %U`) {
+            throw new Error(
+              'Installed desktop entry does not launch the packaged Outreachr executable',
+            );
+          }
+          staged.push({
+            kind: 'deb',
+            executable: installedExecutable,
+            environment: {},
+            cleanup: () => cleanupDeb(packageName, deps),
+          });
+        } catch (error) {
+          throwWithCleanup(
+            error,
+            await collectCleanupErrors([() => cleanupDeb(packageName, deps)]),
+            'Debian package staging',
+          );
+        }
       }
       return staged;
     }
     throw new Error(`Unsupported smoke-test platform ${process.platform}`);
   } catch (error) {
-    throwWithCleanup(error, await cleanupDistributions(staged), 'Distribution staging');
+    throwWithCleanup(error, await cleanupDistributions(staged, deps), 'Distribution staging');
   }
 }
 
-export async function cleanupDistributions(distributions) {
+export async function cleanupDistributions(distributions, deps = {}) {
   return await collectCleanupErrors(
     [...distributions].reverse().map((distribution) => () => distribution.cleanup()),
   );
 }
 
-export async function uniqueAppExecutable(root, label) {
-  const executables = (await walkFiles(root)).filter((file) =>
+export async function uniqueAppExecutable(root, label, deps = {}) {
+  const walk = deps.walkFiles ?? walkFiles;
+  const executables = (await walk(root)).filter((file) =>
     /Outreachr\.app\/Contents\/MacOS\/Outreachr$/.test(file),
   );
   if (executables.length !== 1)
@@ -582,26 +729,30 @@ export function appBundleForExecutable(executable) {
   return bundle;
 }
 
-export async function verifyMacAppBundle(executable, label) {
-  await run('codesign', ['--verify', '--deep', '--strict', appBundleForExecutable(executable)], {
+export async function verifyMacAppBundle(executable, label, deps = {}) {
+  const runCmd = deps.run ?? run;
+  await runCmd('codesign', ['--verify', '--deep', '--strict', appBundleForExecutable(executable)], {
     capture: false,
   });
   console.log(`${label} preserves a valid macOS code signature.`);
 }
 
-export async function cleanupNsis(installRoot) {
-  const uninstallers = (await walkFiles(installRoot)).filter((file) =>
+export async function cleanupNsis(installRoot, deps = {}) {
+  const walk = deps.walkFiles ?? walkFiles;
+  const runExe = deps.runExecutable ?? runExecutable;
+  const remTree = deps.removeTree ?? removeTree;
+  const uninstallers = (await walk(installRoot)).filter((file) =>
     /^uninstall.*\.exe$/i.test(path.basename(file)),
   );
   const cleanupErrors = await collectCleanupErrors([
     ...uninstallers.map(
       (uninstaller) => () =>
-        runExecutable(uninstaller, nsisUninstallArgs(installRoot), {
+        runExe(uninstaller, nsisUninstallArgs(installRoot), {
           capture: false,
           timeoutMs: 60_000,
         }),
     ),
-    () => removeTree(installRoot),
+    () => remTree(installRoot),
   ]);
   throwCleanupErrors(cleanupErrors, 'NSIS installation');
 }
@@ -615,27 +766,30 @@ export async function removeTree(target) {
   });
 }
 
-export async function cleanupDeb(packageName) {
-  if ((await debPackageStatus(packageName)) === null) return;
-  await run('sudo', ['dpkg', '--remove', packageName], { capture: false, timeoutMs: 60_000 });
-  const status = await debPackageStatus(packageName);
+export async function cleanupDeb(packageName, deps = {}) {
+  const runCmd = deps.run ?? run;
+  if ((await debPackageStatus(packageName, deps)) === null) return;
+  await runCmd('sudo', ['dpkg', '--remove', packageName], { capture: false, timeoutMs: 60_000 });
+  const status = await debPackageStatus(packageName, deps);
   if (status !== null && !['config-files', 'not-installed'].includes(status)) {
     throw new Error(`Debian package cleanup left ${packageName} in state ${status}`);
   }
 }
 
-export async function debPackageStatus(packageName) {
-  const result = await run(
+export async function debPackageStatus(packageName, deps = {}) {
+  const runCmd = deps.run ?? run;
+  const result = await runCmd(
     'dpkg-query',
     ['--show', '--showformat=${db:Status-Status}', packageName],
     { allowFailure: true },
   );
-  return result.code === 0 ? result.stdout.trim() : null;
+  return result && result.code === 0 ? result.stdout.trim() : null;
 }
 
-export async function pathEntryExists(target) {
+export async function pathEntryExists(target, deps = {}) {
+  const fileSystem = deps.fs ?? fs;
   try {
-    await fs.lstat(target);
+    await fileSystem.lstat(target);
     return true;
   } catch (error) {
     if (error?.code === 'ENOENT') return false;
@@ -643,7 +797,8 @@ export async function pathEntryExists(target) {
   }
 }
 
-export async function getDevToolsTargets(port) {
+export async function getDevToolsTargets(port, deps = {}) {
+  if (deps.getDevToolsTargets) return await deps.getDevToolsTargets(port, deps);
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
     signal: AbortSignal.timeout(2_000),
   });
@@ -651,16 +806,19 @@ export async function getDevToolsTargets(port) {
   return await response.json();
 }
 
-export async function waitForRendererReadiness(port, timeout) {
+export async function waitForRendererReadiness(port, timeout, deps = {}) {
+  if (deps.waitForRendererReadiness) {
+    return await deps.waitForRendererReadiness(port, timeout, deps);
+  }
   const deadline = Date.now() + timeout;
   let lastError = 'DevTools endpoint not available';
   while (Date.now() < deadline) {
     try {
-      const targets = await getDevToolsTargets(port);
+      const targets = await getDevToolsTargets(port, deps);
       for (const target of targets.filter(
         (item) => item.type === 'page' && item.webSocketDebuggerUrl,
       )) {
-        const snapshot = await evaluateRendererReadiness(target.webSocketDebuggerUrl);
+        const snapshot = await evaluateRendererReadiness(target.webSocketDebuggerUrl, deps);
         if (
           ['interactive', 'complete'].includes(snapshot.readyState) &&
           snapshot.title === 'Outreachr' &&
@@ -682,7 +840,7 @@ export async function waitForRendererReadiness(port, timeout) {
   throw new Error(`timed out waiting for initialized renderer: ${lastError}`);
 }
 
-export async function evaluateRendererReadiness(webSocketUrl) {
+export async function evaluateRendererReadiness(webSocketUrl, deps = {}) {
   const expression = `(() => ({
     readyState: document.readyState,
     title: document.title,
@@ -692,10 +850,11 @@ export async function evaluateRendererReadiness(webSocketUrl) {
     error: Boolean(document.querySelector('.error-screen')),
     workspace: document.querySelector('.onboarding-shell') ? 'onboarding' : document.querySelector('.app-shell') ? 'workspace' : 'unknown'
   }))()`;
-  return await evaluateCDP(webSocketUrl, expression);
+  return await (deps.evaluateCDP ?? evaluateCDP)(webSocketUrl, expression, deps);
 }
 
-export async function evaluateCDP(webSocketUrl, expression) {
+export async function evaluateCDP(webSocketUrl, expression, deps = {}) {
+  if (deps.evaluateCDP) return await deps.evaluateCDP(webSocketUrl, expression, deps);
   return await new Promise((resolve, reject) => {
     const socket = new WebSocket(webSocketUrl);
     const timeout = setTimeout(() => {
@@ -733,24 +892,9 @@ export async function evaluateCDP(webSocketUrl, expression) {
   });
 }
 
-export async function availablePort() {
-  return await new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'object' && address ? address.port : null;
-      server.close((error) => {
-        if (error) reject(error);
-        else if (port) resolve(port);
-        else reject(new Error('Could not allocate a renderer-debugging port'));
-      });
-    });
-  });
-}
-
-export async function terminateTree(pid) {
+export async function terminateTree(pid, deps = {}) {
   if (!pid) return;
+  if (deps.terminateTree) return await deps.terminateTree(pid, deps);
   if (process.platform === 'win32') {
     await new Promise((resolve) => {
       const killer = spawn('taskkill.exe', ['/pid', String(pid), '/t', '/f'], {

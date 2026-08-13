@@ -32,7 +32,12 @@ import {
 import { assessReleaseSecrets } from './validate-release-secrets.mjs';
 import { verifyFuseBinary } from './verify-electron-fuses.mjs';
 import { signingStatus } from './write-signing-status.mjs';
-import { parseSmokeArgs } from './smoke-packaged-app.mjs';
+import {
+  parseSmokeArgs,
+  runPackagedSmoke,
+  stageDistributions,
+  smokeDistribution,
+} from './smoke-packaged-app.mjs';
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-release-script-test-'));
 try {
@@ -721,7 +726,7 @@ try {
   );
   assert.notEqual(collisionResult.code, 0, 'artifact basename collisions must be rejected');
 
-  // Packaged application smoke script self-tests: argument validation, isolation, and persistence protocol assertions
+  // Packaged application smoke script self-tests: argument validation, isolation, explicit path selection, and persistence protocol assertions
   assert.deepEqual(
     parseSmokeArgs(['--dmg', '--release-dir', temporaryRoot, '--timeout-ms', '60000']),
     {
@@ -729,6 +734,8 @@ try {
       timeoutMs: 60000,
       kind: 'dmg',
       arch: undefined,
+      dmgPath: undefined,
+      zipPath: undefined,
     },
   );
   assert.deepEqual(parseSmokeArgs(['--zip', '--arch', 'arm64']), {
@@ -736,6 +743,16 @@ try {
     timeoutMs: 120000,
     kind: 'zip',
     arch: 'arm64',
+    dmgPath: undefined,
+    zipPath: undefined,
+  });
+  assert.deepEqual(parseSmokeArgs(['--dmg', path.join(temporaryRoot, 'custom.dmg')]), {
+    releaseDir: path.resolve(path.join(repoRoot, 'apps', 'desktop', 'release')),
+    timeoutMs: 120000,
+    kind: 'dmg',
+    arch: undefined,
+    dmgPath: path.resolve(path.join(temporaryRoot, 'custom.dmg')),
+    zipPath: undefined,
   });
   assert.throws(
     () => parseSmokeArgs(['--dmg', '--zip']),
@@ -750,8 +767,261 @@ try {
     /Invalid --timeout-ms value/,
   );
 
+  // Behavioral Self-Tests using Fakes (Isolation, Profile Reuse, Explicit Paths, Multi-Arch Selection, Cleanup, Persistence Failure)
+  {
+    // Test 1: Explicit artifact path selection without directory searching or ignoring path
+    const stagedExplicit = [];
+    const fakeDepsExplicit = {
+      walkFiles: async () => [], // Empty release dir proves explicit path is not searching dir
+      mkdtemp: async (prefix) => path.join(temporaryRoot, path.basename(prefix) + '123'),
+      run: async (cmd, args) => {
+        if (cmd === 'hdiutil' && args[0] === 'attach') {
+          stagedExplicit.push({ cmd: 'attach', target: args[args.length - 1] });
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      uniqueAppExecutable: async () => '/fake/mount/Outreachr.app/Contents/MacOS/Outreachr',
+      verifyMacAppBundle: async () => {},
+      executableArchitecture: async () => ['arm64'],
+      removeTree: async () => {},
+    };
+
+    const explicitDmg = path.join(temporaryRoot, 'explicit-outreachr.dmg');
+    const stageResult = await stageDistributions(
+      temporaryRoot,
+      { kind: 'dmg', dmgPath: explicitDmg },
+      fakeDepsExplicit,
+    );
+    assert.equal(stageResult.length, 1);
+    assert.equal(stageResult[0].kind, 'DMG installation');
+    assert.equal(stagedExplicit.length, 1);
+    assert.equal(stagedExplicit[0].target, explicitDmg, 'Explicit DMG path must be attached directly');
+    await stageResult[0].cleanup();
+  }
+
+  {
+    // Test 2: Multi-arch artifact selection and failure on ambiguous multi-arch without --arch
+    const multiArchFiles = [
+      path.join(temporaryRoot, 'Outreachr-1.0.0-arm64.dmg'),
+      path.join(temporaryRoot, 'Outreachr-1.0.0-x64.dmg'),
+    ];
+    const attachedTargets = [];
+    const fakeDepsMultiArch = {
+      walkFiles: async () => multiArchFiles,
+      mkdtemp: async (prefix) => path.join(temporaryRoot, path.basename(prefix) + '456'),
+      run: async (cmd, args) => {
+        if (cmd === 'hdiutil' && args[0] === 'attach') {
+          attachedTargets.push(args[args.length - 1]);
+        }
+        return { code: 0, stdout: '', stderr: '' };
+      },
+      uniqueAppExecutable: async () => '/fake/mount/Outreachr.app/Contents/MacOS/Outreachr',
+      verifyMacAppBundle: async () => {},
+      executableArchitecture: async () => ['arm64'],
+      removeTree: async () => {},
+    };
+
+    // Selecting arm64 explicitly
+    const stagedArm64 = await stageDistributions(
+      temporaryRoot,
+      { kind: 'dmg', arch: 'arm64' },
+      fakeDepsMultiArch,
+    );
+    assert.equal(stagedArm64.length, 1);
+    assert.equal(attachedTargets[0], multiArchFiles[0], 'Must select arm64 DMG artifact when --arch arm64 is requested');
+    await stagedArm64[0].cleanup();
+
+    // Ambiguous multi-arch without --arch must throw clear error
+    await assert.rejects(
+      () => stageDistributions(temporaryRoot, { kind: 'dmg' }, fakeDepsMultiArch),
+      /Expected exactly one DMG distribution under .* for arch|Specify --arch or explicit --dmg <path>/,
+    );
+  }
+
+  {
+    // Test 3 & 4 & 5: Profile creation/reuse, persistence protocol, and cleanup on success
+    const spawnedArgs = [];
+    const terminatedPids = [];
+    const removedTrees = [];
+    let allocatedPort = 9000;
+
+    const fakeDistribution = {
+      kind: 'DMG installation',
+      executable: '/fake/install/Outreachr.app/Contents/MacOS/Outreachr',
+      environment: {},
+      cleanup: async () => {},
+    };
+
+    let session1CreatedAppId = null;
+
+    const fakeDepsSuccess = {
+      mkdtemp: async (prefix) => {
+        const dir = path.join(temporaryRoot, path.basename(prefix) + '789');
+        await fs.mkdir(dir, { recursive: true });
+        return dir;
+      },
+      availablePort: async () => ++allocatedPort,
+      spawnProcess: (dist, profile, port) => {
+        const pid = 1000 + spawnedArgs.length;
+        spawnedArgs.push({ profile, port, pid });
+        return {
+          pid,
+          exitCode: null,
+          stdout: { on: () => {} },
+          stderr: { on: () => {} },
+          once: () => {},
+        };
+      },
+      waitForRendererReadiness: async () => ({
+        readyState: 'complete',
+        title: 'Outreachr',
+        rootChildCount: 1,
+        bodyTextLength: 100,
+        loading: false,
+        error: false,
+        workspace: 'workspace',
+      }),
+      driveJobApplicationCreation: async () => {
+        session1CreatedAppId = 'app-record-abc-123';
+        return {
+          applicationId: session1CreatedAppId,
+          role: 'Packaged Smoke Reliability Engineer',
+          companyName: 'Acme Packaging Corp',
+        };
+      },
+      driveJobApplicationPersistenceCheck: async (port, expectedId) => {
+        assert.equal(expectedId, session1CreatedAppId, 'Session 2 must check persistence for the exact applicationId created in Session 1');
+        return {
+          verified: true,
+          applicationId: expectedId,
+          role: 'Packaged Smoke Reliability Engineer',
+          companyName: 'Acme Packaging Corp',
+        };
+      },
+      terminateTree: async (pid) => {
+        terminatedPids.push(pid);
+      },
+      removeTree: async (target) => {
+        removedTrees.push(target);
+        await fs.rm(target, { recursive: true, force: true });
+      },
+    };
+
+    await smokeDistribution(fakeDistribution, 5000, fakeDepsSuccess);
+
+    // Profile uniqueness & reuse assertions
+    assert.equal(spawnedArgs.length, 2, 'Must launch application twice (Session 1 Creation and Session 2 Persistence Check)');
+    const session1Profile = spawnedArgs[0].profile;
+    const session2Profile = spawnedArgs[1].profile;
+    assert.ok(session1Profile.includes('outreachr-smoke-profile-'), 'Profile directory must be a dedicated temporary directory');
+    assert.equal(session1Profile, session2Profile, 'Session 2 must reuse the exact same user data profile directory as Session 1');
+
+    // Process termination assertions
+    assert.ok(terminatedPids.includes(spawnedArgs[0].pid), 'Session 1 process tree must be terminated');
+    assert.ok(terminatedPids.includes(spawnedArgs[1].pid), 'Session 2 process tree must be terminated');
+
+    // Cleanup assertion
+    assert.ok(removedTrees.includes(session1Profile), 'Profile directory must be cleaned up on success');
+  }
+
+  {
+    // Test 6: Persistence failure propagation & false-positive detection
+    const fakeDistribution = {
+      kind: 'ZIP',
+      executable: '/fake/zip/Outreachr.app/Contents/MacOS/Outreachr',
+      environment: {},
+      cleanup: async () => {},
+    };
+
+    const fakeDepsPersistenceFailure = {
+      mkdtemp: async (prefix) => {
+        const dir = path.join(temporaryRoot, path.basename(prefix) + 'fail1');
+        await fs.mkdir(dir, { recursive: true });
+        return dir;
+      },
+      availablePort: async () => 9100,
+      spawnProcess: () => ({
+        pid: 2001,
+        exitCode: null,
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        once: () => {},
+      }),
+      waitForRendererReadiness: async () => ({
+        readyState: 'complete',
+        title: 'Outreachr',
+        rootChildCount: 1,
+        bodyTextLength: 100,
+        loading: false,
+        error: false,
+        workspace: 'workspace',
+      }),
+      driveJobApplicationCreation: async () => ({
+        applicationId: 'app-record-xyz-789',
+        role: 'Packaged Smoke Reliability Engineer',
+        companyName: 'Acme Packaging Corp',
+      }),
+      driveJobApplicationPersistenceCheck: async () => {
+        throw new Error('Persisted application record app-record-xyz-789 was not found on relaunch');
+      },
+      terminateTree: async () => {},
+      removeTree: async (target) => {
+        await fs.rm(target, { recursive: true, force: true });
+      },
+    };
+
+    await assert.rejects(
+      () => smokeDistribution(fakeDistribution, 5000, fakeDepsPersistenceFailure),
+      /Persisted application record app-record-xyz-789 was not found on relaunch/,
+    );
+  }
+
+  {
+    // Test 7: Cleanup execution on primary failure
+    let profileCreated = null;
+    let profileRemoved = false;
+
+    const fakeDistribution = {
+      kind: 'DMG installation',
+      executable: '/fake/install/Outreachr.app/Contents/MacOS/Outreachr',
+      environment: {},
+      cleanup: async () => {},
+    };
+
+    const fakeDepsPrimaryFailure = {
+      mkdtemp: async (prefix) => {
+        profileCreated = path.join(temporaryRoot, path.basename(prefix) + 'fail2');
+        await fs.mkdir(profileCreated, { recursive: true });
+        return profileCreated;
+      },
+      availablePort: async () => 9200,
+      spawnProcess: () => ({
+        pid: 3001,
+        exitCode: null,
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        once: () => {},
+      }),
+      waitForRendererReadiness: async () => {
+        throw new Error('Renderer failed to initialize during Session 1');
+      },
+      terminateTree: async () => {},
+      removeTree: async (target) => {
+        if (target === profileCreated) profileRemoved = true;
+        await fs.rm(target, { recursive: true, force: true });
+      },
+    };
+
+    await assert.rejects(
+      () => smokeDistribution(fakeDistribution, 5000, fakeDepsPrimaryFailure),
+      /Renderer failed to initialize during Session 1/,
+    );
+
+    assert.ok(profileRemoved, 'Temporary profile directory must be cleaned up when primary smoke execution fails');
+  }
+
   console.log(
-    'Release-script self-test passed: command portability, cleanup-error preservation, deterministic NSIS uninstall, active dependency metadata, Electron fuse enforcement, optional/partial signing policy, trust disclosures, pinned seed integrity, checksums, tamper/path safety, all six release bundles, complete attestation coverage, draft-asset comparison, and collision rejection.',
+    'Release-script self-test passed: command portability, cleanup-error preservation, deterministic NSIS uninstall, active dependency metadata, Electron fuse enforcement, optional/partial signing policy, trust disclosures, pinned seed integrity, checksums, tamper/path safety, all six release bundles, complete attestation coverage, draft-asset comparison, collision rejection, and packaged application smoke protocol (explicit path selection, multi-arch resolution, profile reuse, persistence propagation, and teardown).',
   );
 } finally {
   await fs.rm(temporaryRoot, { recursive: true, force: true });

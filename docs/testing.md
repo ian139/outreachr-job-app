@@ -44,12 +44,13 @@ To verify packaged macOS distributions (DMG and ZIP) in temporary isolated envir
 
 ```bash
 pnpm smoke:packaged
-# Or specify explicit flags:
+# Or specify explicit flags or explicit artifact paths:
 node scripts/smoke-packaged-app.mjs --dmg --arch arm64 --release-dir apps/desktop/release
+node scripts/smoke-packaged-app.mjs --dmg ./apps/desktop/release/Outreachr-1.0.0-arm64.dmg --arch arm64
 ```
 
 The packaged application smoke harness performs deterministic verification:
-1. **Argument validation**: Accepts `--dmg`, `--zip`, `--kind`, `--arch` (`x64` or `arm64`), `--release-dir`, and `--timeout-ms`. Validates mutually exclusive options and platform constraints.
+1. **Argument validation**: Accepts `--dmg` (`[path]`), `--zip` (`[path]`), `--kind`, `--arch` (`x64` or `arm64`), `--release-dir`, and `--timeout-ms`. Explicit artifact paths (`--dmg <path>` or `--zip <path>`) stage only the specified artifact file. Validates mutually exclusive options and platform constraints.
 2. **Temporary isolation**: Stages DMGs by mounting with `hdiutil attach -nobrowse -readonly`, copying the `.app` bundle via `ditto` to a temporary directory in `os.tmpdir()`, unmounting the DMG, and extracting ZIPs into an isolated temporary folder. Never installs globally.
 3. **Code signature enforcement**: Executes `codesign --verify --deep --strict` on the staged `.app` bundle before launch. Missing binaries or invalid code signatures immediately fail staging.
 4. **Lifecycle and persistence protocol**:
