@@ -333,18 +333,12 @@ export function InboxPage(): React.JSX.Element {
     }
   }, [selectedThreadSummary, threadDetail, selectedAccount, loadingDetail]);
 
-  // Filter loaded rows client-side in addition to server query
-  const displayedThreads = useMemo(() => {
-    if (!searchQuery.trim()) return threads;
-    const q = searchQuery.toLowerCase().trim();
-    return threads.filter(
-      (t) =>
-        t.subject.toLowerCase().includes(q) ||
-        (t.snippet && t.snippet.toLowerCase().includes(q)) ||
-        t.participants.some((p) => p.toLowerCase().includes(q)) ||
-        t.accountEmail.toLowerCase().includes(q),
-    );
-  }, [threads, searchQuery]);
+  // The provider/connector is the authoritative search filter: typing in the
+  // search field refetches the listing with the query (see the loadThreads
+  // effect), and loaded rows are rendered as returned. A second client-side
+  // pass is intentionally NOT applied, because connector-valid matches can
+  // span multiple fields (for example a subject token plus a sender token in
+  // a multi-token query) and a narrower in-memory match would hide them.
 
   // Handle external link clicks in rich HTML
   const handleRichLinkClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -477,7 +471,7 @@ export function InboxPage(): React.JSX.Element {
                   Loading conversations...
                 </p>
               </div>
-            ) : displayedThreads.length === 0 ? (
+            ) : threads.length === 0 ? (
               <EmptyState
                 title="No mail threads"
                 detail={
@@ -487,7 +481,7 @@ export function InboxPage(): React.JSX.Element {
                 }
               />
             ) : (
-              displayedThreads.map((thread) => {
+              threads.map((thread) => {
                 const isSelected = selectedThreadSummary?.threadId === thread.threadId;
                 const formattedDate = new Date(thread.latestAt).toLocaleDateString(undefined, {
                   month: 'short',

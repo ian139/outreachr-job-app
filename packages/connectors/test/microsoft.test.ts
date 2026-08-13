@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { base64UrlDecodeToUtf8, utf8Base64Url } from '../src/index.js';
 import { MicrosoftConnector } from '../src/index.js';
 import { approvedSafety, ledger, message, noSleep, now, sendContext } from './helpers.js';
 
@@ -664,6 +665,278 @@ describe('Microsoft Graph mail and calendar connector', () => {
         pageSize: 10,
       }),
     ).rejects.toThrow('Mail view mode must be job-relevant or all');
+  });
+
+  it('caps dense job-relevant pages at pageSize and continues without skipping or duplicating threads', async () => {
+    let calls = 0;
+    // 31 matching messages on the first Graph page: conv-1..conv-30 plus a
+    // second message of conv-5, proving that in-stream duplicate messages of
+    // an already-returned conversation are never re-emitted as a new thread.
+    const page1: Array<Record<string, unknown>> = [];
+    for (let i = 1; i <= 30; i += 1) {
+      page1.push({
+        id: `p1-${i}`,
+        conversationId: `conv-${i}`,
+        subject: `Interview invitation ${i}`,
+        bodyPreview: `Schedule for conversation ${i}`,
+        from: { emailAddress: { address: `recruiter${i}@example.com`, name: `Recruiter ${i}` } },
+        toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+        receivedDateTime: `2026-08-05T12:00:${String(i).padStart(2, '0')}Z`,
+        webLink: `https://outlook.office.com/mail/id/p1-${i}`,
+      });
+    }
+    page1.push({
+      id: 'p1-5b',
+      conversationId: 'conv-5',
+      subject: 'Re: Interview invitation 5',
+      bodyPreview: 'Also please bring documents',
+      from: { emailAddress: { address: 'recruiter5@example.com', name: 'Recruiter 5' } },
+      toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+      receivedDateTime: '2026-08-05T11:59:00Z',
+      webLink: 'https://outlook.office.com/mail/id/p1-5b',
+    });
+
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        calls += 1;
+        // The first page carries the page-size cap; continuation links from
+        // Graph carry only the provider's own paging parameters.
+        if (!url.searchParams.get('$skiptoken')) {
+          expect(url.searchParams.get('$top')).toBe('10');
+        }
+        if (url.searchParams.get('$skiptoken') === 'dense-page-2') {
+          return HttpResponse.json({
+            value: [
+              {
+                id: 'p2-1',
+                conversationId: 'conv-31',
+                subject: 'Interview invitation 31',
+                bodyPreview: 'Final round',
+                from: {
+                  emailAddress: { address: 'recruiter31@example.com', name: 'Recruiter 31' },
+                },
+                toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+                receivedDateTime: '2026-08-05T10:00:00Z',
+                webLink: 'https://outlook.office.com/mail/id/p2-1',
+              },
+              {
+                id: 'p2-2',
+                conversationId: 'conv-32',
+                subject: 'Interview invitation 32',
+                bodyPreview: 'Team chat',
+                from: {
+                  emailAddress: { address: 'recruiter32@example.com', name: 'Recruiter 32' },
+                },
+                toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+                receivedDateTime: '2026-08-05T09:00:00Z',
+                webLink: 'https://outlook.office.com/mail/id/p2-2',
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({
+          value: page1,
+          '@odata.nextLink':
+            'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=dense-page-2',
+        });
+      }),
+    );
+
+    const connector = client();
+    const seen = new Set<string>();
+
+    const first = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+    });
+    expect(first.threads.map((t) => t.threadId).sort()).toEqual(
+      [
+        'conv-1',
+        'conv-2',
+        'conv-3',
+        'conv-4',
+        'conv-5',
+        'conv-6',
+        'conv-7',
+        'conv-8',
+        'conv-9',
+        'conv-10',
+      ].sort(),
+    );
+    first.threads.forEach((t) => seen.add(t.threadId));
+    expect(first.nextPageToken).toBeDefined();
+
+    const second = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+      pageToken: first.nextPageToken,
+    });
+    expect(second.threads).toHaveLength(10);
+    second.threads.forEach((t) => {
+      expect(seen.has(t.threadId)).toBe(false);
+      seen.add(t.threadId);
+    });
+    expect(second.nextPageToken).toBeDefined();
+
+    const third = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+      pageToken: second.nextPageToken,
+    });
+    expect(third.threads).toHaveLength(10);
+    third.threads.forEach((t) => {
+      expect(seen.has(t.threadId)).toBe(false);
+      seen.add(t.threadId);
+    });
+    // The whole first Graph page is drained, but its continuation link is
+    // still unconsumed, so pagination must keep going without skipping it.
+    expect(third.nextPageToken).toBeDefined();
+
+    const fourth = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+      pageToken: third.nextPageToken,
+    });
+    expect(fourth.threads.map((t) => t.threadId).sort()).toEqual(['conv-31', 'conv-32']);
+    expect(fourth.nextPageToken).toBeUndefined();
+
+    // 32 distinct threads, no duplicates; conv-5 was emitted exactly once.
+    expect(seen.size).toBe(30);
+    expect(fourth.threads.map((t) => t.threadId).filter((id) => seen.has(id))).toEqual([]);
+    expect(seen.has('conv-5')).toBe(true);
+    // The dense first page was re-fetched while draining (calls 1-3), then
+    // its Graph continuation was consumed (call 4). No page was skipped and
+    // no thread was returned twice.
+    expect(calls).toBe(4);
+  });
+
+  it('rejects tampered, stale, or oversized job-relevant continuation tokens', async () => {
+    // 25 matching messages on the first page so a pageSize-10 listing keeps
+    // producing continuation tokens, and a terminating empty page for the
+    // provider's own continuation link.
+    const dense: Array<Record<string, unknown>> = [];
+    for (let i = 1; i <= 25; i += 1) {
+      dense.push({
+        id: `msg-${i}`,
+        conversationId: `conv-${i}`,
+        subject: `Interview invitation ${i}`,
+        bodyPreview: 'Schedule',
+        from: { emailAddress: { address: `recruiter${i}@acme.com`, name: 'Acme Recruiter' } },
+        toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+        receivedDateTime: `2026-08-05T12:00:${String(i).padStart(2, '0')}Z`,
+        webLink: `https://outlook.office.com/mail/id/msg-${i}`,
+      });
+    }
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get('$skiptoken') === 'next1') {
+          return HttpResponse.json({ value: [] });
+        }
+        return HttpResponse.json({
+          value: dense,
+          '@odata.nextLink':
+            'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=next1',
+        });
+      }),
+    );
+
+    const connector = client();
+    const first = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 10,
+    });
+    const token = first.nextPageToken;
+    expect(token).toBeDefined();
+
+    // Same listing parameters: accepted and continues past the pending page.
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageSize: 10,
+        pageToken: token,
+      }),
+    ).resolves.toBeDefined();
+
+    const tamper = (mutate: (state: Record<string, unknown>) => void): string => {
+      const state = JSON.parse(base64UrlDecodeToUtf8(token!)) as Record<string, unknown>;
+      mutate(state);
+      return utf8Base64Url(JSON.stringify(state));
+    };
+
+    const expectRejected = async (pageToken: string) => {
+      await expect(
+        connector.listMailboxThreads({
+          accountEmail: 'applicant@example.com',
+          pageSize: 10,
+          pageToken,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+    };
+
+    await expectRejected(tamper((state) => { state.a = 'other@example.com'; }));
+    await expectRejected(tamper((state) => { state.q = 'offer'; }));
+    await expectRejected(tamper((state) => { state.p = 20; }));
+    await expectRejected(tamper((state) => { state.v = 2; }));
+    await expectRejected('not-a-valid-token');
+
+    // Oversized tokens are rejected by the mailbox page-token validation.
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageSize: 10,
+        pageToken: 'x'.repeat(5000),
+      }),
+    ).rejects.toThrow('Page token is invalid');
+
+    // A token minted for one page size must not be reused for another.
+    const sized = await connector.listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      pageSize: 20,
+    });
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageSize: 10,
+        pageToken: sized.nextPageToken,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+  });
+
+  it('job-relevant mode matches multi-token queries across fields (interview acme)', async () => {
+    server.use(
+      http.get('https://graph.microsoft.com/v1.0/me/messages', ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get('$search')).toBeNull();
+        return HttpResponse.json({
+          value: [
+            {
+              id: 'ms-msg-interview',
+              conversationId: 'conv-acme',
+              subject: 'Interview invitation',
+              bodyPreview: 'Let us find a time to talk',
+              from: { emailAddress: { address: 'recruiter@acme.com', name: 'Acme Recruiter' } },
+              toRecipients: [{ emailAddress: { address: 'applicant@example.com' } }],
+              receivedDateTime: '2026-08-05T12:00:00Z',
+              webLink: 'https://outlook.office.com/mail/id/ms-msg-interview',
+            },
+          ],
+        });
+      }),
+    );
+
+    const result = await client().listMailboxThreads({
+      accountEmail: 'applicant@example.com',
+      query: 'interview acme',
+      pageSize: 10,
+    });
+
+    // `interview` matched the subject while `acme` matched only the sender
+    // address; both tokens had to hold across fields, and the thread must be
+    // returned exactly once with no provider-side search query.
+    expect(result.threads.map((t) => t.threadId)).toEqual(['conv-acme']);
+    expect(result.nextPageToken).toBeUndefined();
   });
 
   it('gets Microsoft mailbox thread with plain/HTML, pre/table/quoted, direction, webLink, cancellation, and truncation', async () => {

@@ -1,4 +1,5 @@
 import { validateEventInput, validateFreeBusyInput, validateListInput } from './calendar.js';
+import { base64UrlDecodeToUtf8, utf8Base64Url } from './encoding.js';
 import { ConnectorError } from './errors.js';
 import { authorizedRequest, parseJson, responseRequestId } from './http.js';
 import {
@@ -135,6 +136,202 @@ function microsoftMailPageUrl(
       message: 'Microsoft mail page token did not point to the expected Graph mail collection',
     });
   }
+  return url;
+}
+
+/**
+ * Caps for the opaque job-relevant continuation. The token is carried through
+ * the mailbox page-token validation (max 4096 chars), so encoding fails
+ * closed before that bound instead of producing a token the caller cannot
+ * round-trip.
+ */
+const MAX_FILTER_CONTINUATION_THREAD_IDS = 250;
+const MAX_FILTER_CONTINUATION_CHARS = 4096;
+const MAX_ENCODED_CONTINUATION_CHARS = 4000;
+
+interface JobRelevantContinuationState {
+  v: 1;
+  accountEmail: string;
+  query: string;
+  pageSize: number;
+  /**
+   * Next Graph page to fetch. When a page holds more matching threads than
+   * fit in one response, this stays on that same page until its unconsumed
+   * tail is drained (re-fetch with the emitted set skipping already-returned
+   * threads); the page's own Graph continuation then takes over naturally.
+   */
+  url: string | undefined;
+  /** Thread ids already emitted, kept to prevent duplicates across calls. */
+  emittedThreadIds: string[];
+}
+
+function graphThreadId(message: GraphMessageJson): string | undefined {
+  const threadId =
+    (typeof message.conversationId === 'string' && message.conversationId.trim()) ||
+    message.id;
+  return threadId || undefined;
+}
+
+function appendThreadMessage(
+  threadMap: Map<string, GraphMessageJson[]>,
+  threadId: string,
+  message: GraphMessageJson,
+): void {
+  const existing = threadMap.get(threadId);
+  if (existing) {
+    existing.push(message);
+  } else {
+    threadMap.set(threadId, [message]);
+  }
+}
+
+function encodeJobRelevantContinuation(state: JobRelevantContinuationState): string {
+  if (state.emittedThreadIds.length > MAX_FILTER_CONTINUATION_THREAD_IDS) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail listing exceeds the continuation safety limit',
+    });
+  }
+  const encoded = utf8Base64Url(
+    JSON.stringify({
+      v: state.v,
+      a: state.accountEmail,
+      q: state.query,
+      p: state.pageSize,
+      u: state.url,
+      t: state.emittedThreadIds,
+    }),
+  );
+  if (encoded.length > MAX_ENCODED_CONTINUATION_CHARS) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail listing exceeds the continuation safety limit',
+    });
+  }
+  return encoded;
+}
+
+function decodeJobRelevantContinuation(
+  token: string,
+  accountEmail: string,
+  query: string,
+  pageSize: number,
+): JobRelevantContinuationState {
+  if (!token || token.length > MAX_FILTER_CONTINUATION_CHARS) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token is invalid',
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(base64UrlDecodeToUtf8(token));
+  } catch (cause) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token is invalid',
+      cause,
+    });
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token is invalid',
+    });
+  }
+  const state = parsed as Record<string, unknown>;
+  if (
+    state.v !== 1 ||
+    state.a !== accountEmail ||
+    state.q !== query ||
+    state.p !== pageSize
+  ) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token does not match this listing',
+    });
+  }
+  const boundedUrl = (value: unknown): string | undefined => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string' || value.length > 4096) {
+      throw new ConnectorError({
+        provider: 'microsoft',
+        operation: 'graph.threads.list',
+        code: 'INVALID_REQUEST',
+        message: 'Microsoft mail page token is invalid',
+      });
+    }
+    return value;
+  };
+  const url = boundedUrl(state.u);
+  const emittedThreadIds = Array.isArray(state.t)
+    ? state.t.filter(
+        (value): value is string => typeof value === 'string' && value.length <= 4096,
+      )
+    : [];
+  if (emittedThreadIds.length > MAX_FILTER_CONTINUATION_THREAD_IDS) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation: 'graph.threads.list',
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token is invalid',
+    });
+  }
+  return {
+    v: 1,
+    accountEmail,
+    query,
+    pageSize,
+    url,
+    emittedThreadIds,
+  };
+}
+
+function normalizeThreadQuery(query: string | undefined): string {
+  const trimmed = (query ?? '').trim();
+  if (!trimmed) return '';
+  return trimmed
+    .replace(/["\\]/g, ' ')
+    .split(/\s+/u)
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * Validate a Graph continuation URL against the expected collection before
+ * it is fetched, and reject tokens that loop back to the same URL.
+ */
+function validateGraphContinuation(
+  nextLink: string,
+  graphBaseUrl: string,
+  operation: string,
+  allowedPaths: readonly string[],
+  seenUrls: Set<string>,
+): URL {
+  const base = new URL(graphBaseUrl);
+  const url = microsoftMailPageUrl(nextLink, graphBaseUrl, operation, allowedPaths);
+  const urlKey = url.toString();
+  if (seenUrls.has(urlKey)) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation,
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token looped back to an already-consumed page',
+    });
+  }
+  seenUrls.add(urlKey);
   return url;
 }
 
@@ -682,22 +879,59 @@ export class MicrosoftConnector
   /**
    * Default job-relevant mode. Microsoft Graph has no server-side term search
    * for arbitrary OR sets, so relevance and user-search tokens are applied to
-   * list metadata (subject, sender, bodyPreview) locally. Pages are scanned
-   * deterministically (bounded by MAX_LOCAL_FILTER_SCAN_PAGES) and the
-   * nextLink of the last consumed page is returned, so pagination continues
-   * without skipping or dropping messages. User text is never interpolated
-   * into a provider query language.
+   * list metadata (subject, sender, bodyPreview) locally. User text is never
+   * interpolated into a provider query language.
+   *
+   * Filtered pages may hold more matching threads than fit in one response.
+   * Each call returns at most `pageSize` distinct threads and, when more
+   * matches exist, an opaque continuation token carrying the deterministic
+   * scan position: the Graph page still to drain (re-fetched with the
+   * already-returned thread ids skipped) and the thread ids already returned.
+   * The token is validated against the account, query, and page size of the
+   * listing, size-bounded, and re-issued across calls so no distinct thread
+   * is skipped or returned twice. Graph pages are scanned at most
+   * MAX_LOCAL_FILTER_SCAN_PAGES per call, and a continuation link that loops
+   * back to a consumed page is rejected instead of looping.
    */
   async #listJobRelevantMailboxThreads(
     input: ListMailboxThreadsInput,
     pageSize: number,
   ): Promise<MailboxThreadPage> {
-    let url: URL;
+    const query = normalizeThreadQuery(input.query);
+    const base = new URL(this.#graphBaseUrl);
+    const allowedPaths = [`${base.pathname}/me/messages`];
+
+    let state: JobRelevantContinuationState;
     if (input.pageToken) {
-      const base = new URL(this.#graphBaseUrl);
-      url = microsoftMailPageUrl(input.pageToken, this.#graphBaseUrl, 'graph.threads.list', [
-        `${base.pathname}/me/messages`,
-      ]);
+      state = decodeJobRelevantContinuation(
+        input.pageToken,
+        input.accountEmail,
+        query,
+        pageSize,
+      );
+    } else {
+      state = {
+        v: 1,
+        accountEmail: input.accountEmail,
+        query,
+        pageSize,
+        url: undefined,
+        emittedThreadIds: [],
+      };
+    }
+
+    const emitted = new Set(state.emittedThreadIds);
+    const consumed = new Set<string>();
+    const threadMap = new Map<string, GraphMessageJson[]>();
+    let url: URL | undefined;
+    if (state.url) {
+      url = validateGraphContinuation(
+        state.url,
+        this.#graphBaseUrl,
+        'graph.threads.list',
+        allowedPaths,
+        consumed,
+      );
     } else {
       url = new URL(`${this.#graphBaseUrl}/me/messages`);
       url.searchParams.set(
@@ -708,29 +942,71 @@ export class MicrosoftConnector
       url.searchParams.set('$top', String(pageSize));
     }
 
-    const collected: GraphMessageJson[] = [];
-    const seenThreads = new Set<string>();
-    let nextLink: string | undefined;
-    for (let scanned = 0; scanned < MAX_LOCAL_FILTER_SCAN_PAGES; scanned += 1) {
+    let scanned = 0;
+    while (
+      scanned < MAX_LOCAL_FILTER_SCAN_PAGES &&
+      threadMap.size < pageSize &&
+      url
+    ) {
       const page = await this.#fetchGraphThreadPage(url, input.signal);
-      nextLink = page['@odata.nextLink'];
+      const pageNextLink = page['@odata.nextLink'];
+      let overflow = false;
       for (const msg of page.value ?? []) {
         if (msg.isDraft === true) continue;
-        if (!this.#isJobRelevantMessage(msg, input.query)) continue;
-        const threadId =
-          (typeof msg.conversationId === 'string' && msg.conversationId.trim()) || msg.id;
-        if (!threadId) continue;
-        seenThreads.add(threadId);
-        collected.push(msg);
+        if (!this.#isJobRelevantMessage(msg, query)) continue;
+        const threadId = graphThreadId(msg);
+        if (!threadId || emitted.has(threadId)) continue;
+        if (threadMap.size >= pageSize) {
+          // The page still holds unconsumed matches. Stay on it: the next
+          // call re-fetches the same URL, and the emitted set skips every
+          // thread that was already returned.
+          overflow = true;
+          break;
+        }
+        emitted.add(threadId);
+        appendThreadMessage(threadMap, threadId, msg);
       }
-      if (seenThreads.size >= pageSize || !nextLink) break;
-      const base = new URL(this.#graphBaseUrl);
-      url = microsoftMailPageUrl(nextLink, this.#graphBaseUrl, 'graph.threads.list', [
-        `${base.pathname}/me/messages`,
-      ]);
+      scanned += 1;
+      if (overflow) {
+        // Keep `url` on this page; its own continuation link is re-read from
+        // the re-fetched page once the tail is drained.
+      } else if (pageNextLink) {
+        url = validateGraphContinuation(
+          pageNextLink,
+          this.#graphBaseUrl,
+          'graph.threads.list',
+          allowedPaths,
+          consumed,
+        );
+      } else {
+        url = undefined;
+      }
     }
 
-    return this.#buildThreadPage(collected, input.accountEmail, nextLink);
+    const threads = this.#buildThreadPage(
+      Array.from(threadMap.values()).flat(),
+      input.accountEmail,
+      undefined,
+    ).threads;
+
+    // More matches remain while any Graph page is left unconsumed (a dense
+    // page still draining or the per-call scan cap reached). Emit a bounded,
+    // validated continuation; a listing whose state would not fit the bounds
+    // fails closed instead of silently dropping or repeating data.
+    if (!url) {
+      return { threads, nextPageToken: undefined };
+    }
+    return {
+      threads,
+      nextPageToken: encodeJobRelevantContinuation({
+        v: 1,
+        accountEmail: input.accountEmail,
+        query,
+        pageSize,
+        url: url.toString(),
+        emittedThreadIds: Array.from(emitted),
+      }),
+    };
   }
 
   async #fetchGraphThreadPage(

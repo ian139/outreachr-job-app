@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   GetMailThreadRequest,
+  ListMailThreadsRequest,
   MailMessageBody,
   MailThreadListPage,
   MailThreadPage,
@@ -132,12 +133,30 @@ function setupInboxFixture() {
     },
   ];
 
-  const listMailThreads = vi.fn(async (): Promise<MailThreadListPage> => {
-    return {
-      threads: [mockThreadSummary1, mockThreadSummary2],
-      nextCursor: 'cursor_page_2',
-    };
-  });
+  // The mock stands in for the connector, which is the authoritative search
+  // filter: each whitespace token must match somewhere across the metadata
+  // fields (subject, snippet, participants, account), and tokens may match
+  // different fields. The renderer must not narrow this result any further.
+  const listMailThreads = vi.fn(
+    async (req: ListMailThreadsRequest): Promise<MailThreadListPage> => {
+      const all = [mockThreadSummary1, mockThreadSummary2];
+      const query = req.query?.trim();
+      if (!query) return { threads: all, nextCursor: 'cursor_page_2' };
+      const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const filtered = all.filter((t) => {
+        const haystack = [
+          t.subject,
+          t.snippet ?? '',
+          ...t.participants,
+          t.accountEmail,
+        ]
+          .join(' ')
+          .toLowerCase();
+        return tokens.every((token) => haystack.includes(token));
+      });
+      return { threads: filtered, nextCursor: 'cursor_page_2' };
+    },
+  );
 
   const getMailThread = vi.fn(async (req: GetMailThreadRequest): Promise<MailThreadPage> => {
     if (req.cursor === 'detail_cursor_2') {
@@ -209,6 +228,91 @@ describe('InboxPage component & messaging behavior', () => {
     await waitFor(() =>
       expect(screen.queryByText('Software Engineer Application Status')).not.toBeInTheDocument(),
     );
+  });
+
+  it('keeps connector-valid cross-field multi-token matches visible (interview acme)', async () => {
+    const fixture = bootstrapFixture();
+    fixture.connectors = [
+      {
+        provider: 'microsoft',
+        state: 'connected',
+        accountEmail: 'founder@example.com',
+        scopes: ['https://graph.microsoft.com/Mail.ReadBasic'],
+        scopeProfile: 'relationship-sync',
+        capabilities: {
+          canReadInbox: true,
+          canSyncRelationships: true,
+          canDraft: true,
+          canSend: true,
+          canReadCalendar: true,
+          canWriteCalendar: true,
+        },
+        lastSyncAt: new Date().toISOString(),
+        error: null,
+        encryptionAvailable: true,
+      },
+    ];
+
+    // Connector-valid for the query `interview acme`: `interview` matches the
+    // subject while `acme` matches only the sender field. The two tokens are
+    // NOT contiguous in any single field, so a second-stage client-side
+    // substring filter would wrongly hide this thread.
+    const crossFieldThread: MailThreadSummary = {
+      provider: 'microsoft',
+      accountEmail: 'founder@example.com',
+      threadId: 'ms-thread-acme',
+      subject: 'Interview invitation',
+      snippet: 'We would like to schedule a conversation',
+      participants: ['Acme Recruiter <recruiter@acme.com>', 'founder@example.com'],
+      latestAt: new Date('2026-08-11T09:00:00Z').toISOString(),
+      messageCount: 1,
+      sourceUrl: null,
+    };
+
+    // Server-side (connector) contract: every whitespace token must match
+    // somewhere across the metadata fields, and tokens may match different
+    // fields. The renderer must render exactly what the connector returns.
+    const listMailThreads = vi.fn(
+      async (req: ListMailThreadsRequest): Promise<MailThreadListPage> => {
+        const query = req.query?.trim();
+        if (!query) return { threads: [crossFieldThread], nextCursor: null };
+        const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+        const haystack = [
+          crossFieldThread.subject,
+          crossFieldThread.snippet ?? '',
+          ...crossFieldThread.participants,
+          crossFieldThread.accountEmail,
+        ]
+          .join(' ')
+          .toLowerCase();
+        return {
+          threads: tokens.every((token) => haystack.includes(token))
+            ? [crossFieldThread]
+            : [],
+          nextCursor: null,
+        };
+      },
+    );
+
+    const bridge = installBridge(fixture);
+    bridge.listMailThreads = listMailThreads;
+    bridge.cancelMailRequest = vi.fn(async () => {});
+    renderInboxPage();
+
+    expect(await screen.findByText('Interview invitation')).toBeInTheDocument();
+
+    const searchInput = screen.getByPlaceholderText('Search mail...');
+    fireEvent.change(searchInput, { target: { value: 'interview acme' } });
+
+    await waitFor(() =>
+      expect(listMailThreads).toHaveBeenLastCalledWith(
+        expect.objectContaining({ provider: 'microsoft', query: 'interview acme' }),
+      ),
+    );
+
+    // The cross-field connector match stays visible after the server refetch.
+    expect(await screen.findByText('Interview invitation')).toBeInTheDocument();
+    expect(screen.queryByText(/No conversations match/i)).not.toBeInTheDocument();
   });
 
   it('lists inbox threads for a read-only connected account', async () => {
