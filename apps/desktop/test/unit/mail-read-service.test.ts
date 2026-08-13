@@ -11,7 +11,9 @@ import { MailReadService } from '../../src/main/mail-read-service';
 import { initializedVault, removeTemporaryDirectory, temporaryDirectory } from '../helpers/vault';
 import type { VaultService } from '../../src/main/vault-service';
 
-function createMockConnector(overrides: Partial<RelationshipMailConnector> = {}): RelationshipMailConnector {
+function createMockConnector(
+  overrides: Partial<RelationshipMailConnector> = {},
+): RelationshipMailConnector {
   return {
     provider: 'google',
     listMailboxMessages: vi.fn().mockResolvedValue({ messages: [] }),
@@ -197,7 +199,9 @@ describe('MailReadService & Bridge IPC', () => {
         limit: 10,
         query: 'a'.repeat(1001),
       };
-      await expect(service.listMailThreads(longQuery)).rejects.toThrow('exceeds maximum length of 1000');
+      await expect(service.listMailThreads(longQuery)).rejects.toThrow(
+        'exceeds maximum length of 1000',
+      );
 
       const longCursor: ListMailThreadsRequest = {
         requestId: 'req-1',
@@ -206,7 +210,9 @@ describe('MailReadService & Bridge IPC', () => {
         limit: 10,
         cursor: 'c'.repeat(4097),
       };
-      await expect(service.listMailThreads(longCursor)).rejects.toThrow('exceeds maximum length of 4096');
+      await expect(service.listMailThreads(longCursor)).rejects.toThrow(
+        'exceeds maximum length of 4096',
+      );
     });
 
     it('validates accountEmail length, CRLF, and basic email format', async () => {
@@ -216,7 +222,9 @@ describe('MailReadService & Bridge IPC', () => {
         accountEmail: 'invalid-email-format',
         limit: 10,
       };
-      await expect(service.listMailThreads(badEmail)).rejects.toThrow('accountEmail must be a valid email address');
+      await expect(service.listMailThreads(badEmail)).rejects.toThrow(
+        'accountEmail must be a valid email address',
+      );
     });
   });
 
@@ -307,6 +315,46 @@ describe('MailReadService & Bridge IPC', () => {
       expect(msg.bodyHtml).toBe('<p>Hello world html body</p>');
       expect(msg.direction).toBe('inbound');
     });
+
+    it('binds response provenance to the selected connector instead of connector payload labels', async () => {
+      const listPage = await mockConnector.listMailboxThreads!({
+        accountEmail: 'user@example.com',
+      });
+      vi.mocked(mockConnector.listMailboxThreads!).mockResolvedValue({
+        ...listPage,
+        threads: listPage.threads.map((thread) => ({ ...thread, provider: 'microsoft' })),
+      });
+      const detailPage = await mockConnector.getMailboxThread!({
+        accountEmail: 'user@example.com',
+        threadId: 'thread-1',
+      });
+      vi.mocked(mockConnector.getMailboxThread!).mockResolvedValue({
+        ...detailPage,
+        thread: { ...detailPage.thread, provider: 'microsoft' },
+        messages: detailPage.messages.map((message) => ({
+          ...message,
+          provider: 'microsoft',
+        })),
+      });
+
+      const list = await service.listMailThreads({
+        requestId: 'req-provenance-list',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        limit: 10,
+      });
+      const detail = await service.getMailThread({
+        requestId: 'req-provenance-detail',
+        provider: 'google',
+        accountEmail: 'user@example.com',
+        threadId: 'thread-1',
+        limit: 10,
+      });
+
+      expect(list.threads[0]?.provider).toBe('google');
+      expect(detail.thread.provider).toBe('google');
+      expect(detail.messages[0]?.provider).toBe('google');
+    });
     it('defensively throws contract violation if provider returns > 50 threads or messages', async () => {
       vi.mocked(mockConnector.listMailboxThreads).mockResolvedValue({
         threads: Array.from({ length: 51 }, (_, i) => ({
@@ -339,7 +387,10 @@ describe('MailReadService & Bridge IPC', () => {
           accountEmail: 'user@example.com',
           threadId: 'thread-1',
           subject: 'Test Thread',
-          participants: [{ email: 'alice@example.com', name: 'Alice' }, { email: 'bob@example.com' }] as unknown as string[],
+          participants: [
+            { email: 'alice@example.com', name: 'Alice' },
+            { email: 'bob@example.com' },
+          ] as unknown as string[],
           latestAt: '2026-08-12T10:00:00Z',
           messageCount: 1,
         },
@@ -417,7 +468,9 @@ describe('MailReadService & Bridge IPC', () => {
         limit: 10,
       };
 
-      await expect(service.getMailThread(request)).rejects.toThrow('Provider bodyText exceeds 1MiB limit');
+      await expect(service.getMailThread(request)).rejects.toThrow(
+        'Provider bodyText exceeds 1MiB limit',
+      );
     });
   });
 
@@ -579,7 +632,9 @@ describe('MailReadService & Bridge IPC', () => {
         limit: 10,
       };
 
-      await expect(service.listMailThreads(request)).rejects.toThrow('Network error from Gmail API');
+      await expect(service.listMailThreads(request)).rejects.toThrow(
+        'Network error from Gmail API',
+      );
       expect(service.activeRequestCount).toBe(0);
     });
   });

@@ -31,7 +31,10 @@ export function WorkspaceSetupPage(): React.JSX.Element {
     );
   }, [displayName, primaryEmail, stages]);
 
-  const updateStage = (key: number, patch: Partial<Pick<StageDraft, 'name' | 'terminal'>>): void => {
+  const updateStage = (
+    key: number,
+    patch: Partial<Pick<StageDraft, 'name' | 'terminal'>>,
+  ): void => {
     setStages((current) =>
       current.map((stage) => (stage.key === key ? { ...stage, ...patch } : stage)),
     );
@@ -66,8 +69,8 @@ export function WorkspaceSetupPage(): React.JSX.Element {
         <p className="eyebrow">Private, local-first workspace</p>
         <h1 id="job-setup-title">Set up your job search</h1>
         <p>
-          Define the stages you actually use. Messages load only when selected, and no email is
-          sent without exact-content approval.
+          Define the stages you actually use. Messages load only when selected, and no email is sent
+          without exact-content approval.
         </p>
         <div className="job-setup-promise">
           <Database aria-hidden="true" />
@@ -136,7 +139,9 @@ export function WorkspaceSetupPage(): React.JSX.Element {
                 tone="quiet"
                 size="small"
                 disabled={stages.length <= 2}
-                onClick={() => setStages((current) => current.filter((item) => item.key !== stage.key))}
+                onClick={() =>
+                  setStages((current) => current.filter((item) => item.key !== stage.key))
+                }
                 aria-label={`Remove stage ${index + 1}`}
               >
                 <Trash2 aria-hidden="true" />

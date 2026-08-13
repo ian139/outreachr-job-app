@@ -581,10 +581,7 @@ export class ConnectorService {
     }
     return (await this.statuses()).find((status) => status.provider === provider)!;
   }
-  getMailConnector(
-    provider: ConnectorProvider,
-    accountEmail: string,
-  ): RelationshipMailConnector {
+  getMailConnector(provider: ConnectorProvider, accountEmail: string): RelationshipMailConnector {
     const config = this.#config(provider);
     if (!config || config.status !== 'connected') {
       throw new Error(`${provider} is not connected`);
@@ -593,13 +590,10 @@ export class ConnectorService {
       throw new Error(`Account ${accountEmail} does not match connected account for ${provider}`);
     }
     if (!this.#relationshipReadScopePresent(provider, config)) {
-      throw new Error(
-        `Relationship sync read scope is not enabled for ${provider}`,
-      );
+      throw new Error(`Relationship sync read scope is not enabled for ${provider}`);
     }
     return this.#calendarConnector(provider);
   }
-
 
   #calendarConnector(provider: ConnectorProvider): GoogleConnector | MicrosoftConnector {
     const options = {

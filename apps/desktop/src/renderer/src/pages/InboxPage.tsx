@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ExternalLink,
-  LoaderCircle,
-  RefreshCw,
-} from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react';
 import type {
   ConnectorProvider,
   ConnectorStatus,
@@ -25,7 +19,9 @@ interface ConnectorOption {
 export function InboxPage(): React.JSX.Element {
   const { data } = useWorkspace();
   const linkedParams = new URLSearchParams(
-    window.location.hash.includes('?') ? window.location.hash.slice(window.location.hash.indexOf('?')) : '',
+    window.location.hash.includes('?')
+      ? window.location.hash.slice(window.location.hash.indexOf('?'))
+      : '',
   );
   const linkedThreadId = linkedParams.get('thread');
   const linkedProvider = linkedParams.get('provider');
@@ -272,7 +268,6 @@ export function InboxPage(): React.JSX.Element {
     threads,
   ]);
 
-
   // Detail cursor pagination: load additional pages of messages in thread detail
   const loadMoreMessages = useCallback(async () => {
     if (
@@ -322,9 +317,7 @@ export function InboxPage(): React.JSX.Element {
       });
     } catch (err) {
       if (activeDetailRequestIdRef.current !== requestId) return;
-      setDetailError(
-        err instanceof Error ? err.message : 'Failed to fetch additional messages.',
-      );
+      setDetailError(err instanceof Error ? err.message : 'Failed to fetch additional messages.');
     } finally {
       if (activeDetailRequestIdRef.current === requestId) {
         setLoadingDetail(false);
@@ -378,9 +371,7 @@ export function InboxPage(): React.JSX.Element {
             <select
               id="inbox-account-select"
               value={
-                selectedAccount
-                  ? `${selectedAccount.provider}:${selectedAccount.accountEmail}`
-                  : ''
+                selectedAccount ? `${selectedAccount.provider}:${selectedAccount.accountEmail}` : ''
               }
               onChange={(e) => {
                 const [prov, email] = e.target.value.split(':');
@@ -403,9 +394,7 @@ export function InboxPage(): React.JSX.Element {
         ) : null}
       </header>
 
-      <div
-        className={`inbox-layout ${showMobileDetail ? 'inbox-layout--show-detail' : ''}`}
-      >
+      <div className={`inbox-layout ${showMobileDetail ? 'inbox-layout--show-detail' : ''}`}>
         {/* Thread List Pane */}
         <aside className="inbox-list-pane" aria-label="Mail threads">
           <div className="inbox-list-toolbar">
@@ -545,11 +534,7 @@ export function InboxPage(): React.JSX.Element {
                   </h2>
 
                   <div className="inbox-detail-header__controls">
-                    <div
-                      className="inbox-view-toggle"
-                      role="group"
-                      aria-label="Content view mode"
-                    >
+                    <div className="inbox-view-toggle" role="group" aria-label="Content view mode">
                       <button
                         type="button"
                         className={viewMode === 'rich' ? 'active' : ''}
@@ -635,11 +620,7 @@ export function InboxPage(): React.JSX.Element {
                                 })}
                               </span>
                               {message.direction ? (
-                                <Badge
-                                  tone={
-                                    message.direction === 'inbound' ? 'info' : 'neutral'
-                                  }
-                                >
+                                <Badge tone={message.direction === 'inbound' ? 'info' : 'neutral'}>
                                   {message.direction}
                                 </Badge>
                               ) : null}
@@ -658,10 +639,7 @@ export function InboxPage(): React.JSX.Element {
 
                           {message.providerTruncated ? (
                             <div className="inbox-truncated-alert" role="alert">
-                              <AlertTriangle
-                                className="inbox-icon-warning"
-                                aria-hidden="true"
-                              />
+                              <AlertTriangle className="inbox-icon-warning" aria-hidden="true" />
                               <span>
                                 Message content truncated by provider.
                                 {message.truncationReason

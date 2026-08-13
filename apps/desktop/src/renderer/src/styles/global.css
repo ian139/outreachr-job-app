@@ -273,6 +273,9 @@ p {
   left: var(--space-3);
   z-index: var(--z-tooltip);
   padding: var(--space-2) var(--space-4);
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   color: var(--on-primary);
   background: var(--primary-action-hover);
   border-radius: var(--radius-sm);
@@ -4803,11 +4806,34 @@ kbd {
     min-height: 88px;
   }
 
+  .brand-button {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .icon-button {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .founder-avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .search-field,
+  .search-field input {
+    min-height: 44px;
+  }
+
   .round-switcher,
   .command-trigger,
   .nav-item,
   .vault-status {
     justify-content: center;
+    min-height: 44px;
   }
 
   .page-header {

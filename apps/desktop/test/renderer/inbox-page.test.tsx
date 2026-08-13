@@ -1,8 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   GetMailThreadRequest,
-  ListMailThreadsRequest,
   MailMessageBody,
   MailThreadListPage,
   MailThreadPage,
@@ -118,34 +117,30 @@ function setupInboxFixture() {
     },
   ];
 
-  const listMailThreads = vi.fn(
-    async (_req: ListMailThreadsRequest): Promise<MailThreadListPage> => {
-      return {
-        threads: [mockThreadSummary1, mockThreadSummary2],
-        nextCursor: 'cursor_page_2',
-      };
-    },
-  );
+  const listMailThreads = vi.fn(async (): Promise<MailThreadListPage> => {
+    return {
+      threads: [mockThreadSummary1, mockThreadSummary2],
+      nextCursor: 'cursor_page_2',
+    };
+  });
 
-  const getMailThread = vi.fn(
-    async (req: GetMailThreadRequest): Promise<MailThreadPage> => {
-      if (req.cursor === 'detail_cursor_2') {
-        return {
-          thread: mockThreadSummary1,
-          messages: [mockMessageHtmlOnly],
-          nextCursor: null,
-        };
-      }
+  const getMailThread = vi.fn(async (req: GetMailThreadRequest): Promise<MailThreadPage> => {
+    if (req.cursor === 'detail_cursor_2') {
       return {
         thread: mockThreadSummary1,
-        messages: [mockMessage1, mockMessage2Truncated],
-        nextCursor: 'detail_cursor_2',
+        messages: [mockMessageHtmlOnly],
+        nextCursor: null,
       };
-    },
-  );
+    }
+    return {
+      thread: mockThreadSummary1,
+      messages: [mockMessage1, mockMessage2Truncated],
+      nextCursor: 'detail_cursor_2',
+    };
+  });
 
-  const cancelMailRequest = vi.fn(async (_reqId: string): Promise<void> => {});
-  const openExternal = vi.fn(async (_url: string): Promise<void> => {});
+  const cancelMailRequest = vi.fn(async (): Promise<void> => {});
+  const openExternal = vi.fn(async (): Promise<void> => {});
 
   const bridge = installBridge(fixture);
   bridge.listMailThreads = listMailThreads;
@@ -262,9 +257,7 @@ describe('InboxPage component & messaging behavior', () => {
     fireEvent.click(plainButton);
 
     // Verify HTML-only message plain text fallback works without displaying '(No text content)'
-    expect(
-      await screen.findByText('HTML only message body with bold detail.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('HTML only message body with bold detail.')).toBeInTheDocument();
     expect(screen.queryByText('(No text content)')).not.toBeInTheDocument();
   });
 
@@ -283,8 +276,9 @@ describe('InboxPage component & messaging behavior', () => {
       },
     ];
 
-    const { promise: delayedPromise, resolve: delayedResolve } = Promise.withResolvers<MailThreadPage>();
-    const getMailThread = vi.fn((_req: GetMailThreadRequest) => delayedPromise);
+    const { promise: delayedPromise, resolve: delayedResolve } =
+      Promise.withResolvers<MailThreadPage>();
+    const getMailThread = vi.fn(() => delayedPromise);
 
     const bridge = installBridge(fixture);
     bridge.listMailThreads = vi.fn(async () => ({
@@ -344,7 +338,9 @@ describe('InboxPage component & messaging behavior', () => {
     fireEvent.click(plainButton);
     expect(plainButton).toHaveClass('active');
     expect(
-      screen.getByText('Thanks for submitting your application. We would love to schedule an interview.'),
+      screen.getByText(
+        'Thanks for submitting your application. We would love to schedule an interview.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -356,12 +352,8 @@ describe('InboxPage component & messaging behavior', () => {
     fireEvent.click(thread1Card);
 
     // Truncated alert banner
-    expect(
-      await screen.findByText(/Message content truncated by provider/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Body exceeds maximum connector size limit/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Message content truncated by provider/i)).toBeInTheDocument();
+    expect(screen.getByText(/Body exceeds maximum connector size limit/i)).toBeInTheDocument();
 
     // Source link
     const sourceButtons = screen.getAllByRole('button', { name: /view in provider|source/i });

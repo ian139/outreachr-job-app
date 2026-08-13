@@ -64,7 +64,13 @@ function addContact(
   at: string,
 ): ContactRecord {
   return repo.createContact(
-    { id, companyId: 'company-acme', name: `Contact ${id}`, title: 'Hiring Manager', primaryEmail: email },
+    {
+      id,
+      companyId: 'company-acme',
+      name: `Contact ${id}`,
+      title: 'Hiring Manager',
+      primaryEmail: email,
+    },
     at,
   );
 }
@@ -135,10 +141,9 @@ describe('job application workspace setup', () => {
     // No edge may originate from the terminal stage.
     expect(
       Number(
-        core.scalar(
-          'SELECT COUNT(*) FROM application_stage_transitions WHERE from_stage_id=?',
-          [stageByName(stages, 'Rejected').id],
-        ),
+        core.scalar('SELECT COUNT(*) FROM application_stage_transitions WHERE from_stage_id=?', [
+          stageByName(stages, 'Rejected').id,
+        ]),
       ),
     ).toBe(0);
     core.close();
@@ -165,10 +170,7 @@ describe('job application workspace setup', () => {
         {
           displayName: 'Dupes',
           primaryEmail: 'founder@example.test',
-          stages: [
-            { name: 'Same' },
-            { name: 'same' },
-          ],
+          stages: [{ name: 'Same' }, { name: 'same' }],
         },
         NOW,
       ),
@@ -222,7 +224,10 @@ describe('job application lifecycle', () => {
     const repo = new OutreachrRepository(core);
     const company = addCompany(repo, NOW);
     expect(() =>
-      repo.createJobApplication({ id: 'app-1', companyId: company.id, role: 'Engineer', stageId: 'stage-x' }, NOW),
+      repo.createJobApplication(
+        { id: 'app-1', companyId: company.id, role: 'Engineer', stageId: 'stage-x' },
+        NOW,
+      ),
     ).toThrow('Workspace must be set up');
     const stages = setUpWorkspace(repo, NOW);
     const applied = stageByName(stages, 'Applied');
@@ -251,10 +256,15 @@ describe('job application lifecycle', () => {
     const applied = stageByName(stages, 'Applied');
     const screen = stageByName(stages, 'Screen');
     addApplication(repo, 'app-1', applied.id, NOW);
-    const detail = repo.transitionJobApplication({ id: 'app-1', toStageId: screen.id, note: 'Resume looks good' }, LATER);
+    const detail = repo.transitionJobApplication(
+      { id: 'app-1', toStageId: screen.id, note: 'Resume looks good' },
+      LATER,
+    );
     expect(detail.stageId).toBe(screen.id);
     expect(detail.stageName).toBe('Screen');
-    expect(detail.stageHistory.map((item) => [item.fromStageId, item.toStageId, item.note])).toEqual([
+    expect(
+      detail.stageHistory.map((item) => [item.fromStageId, item.toStageId, item.note]),
+    ).toEqual([
       [null, applied.id, null],
       [applied.id, screen.id, 'Resume looks good'],
     ]);
@@ -285,10 +295,7 @@ describe('job application lifecycle', () => {
       { fromStageId: applied.id, toStageId: interview.id, allowed: true },
       LATER,
     );
-    const detail = repo.transitionJobApplication(
-      { id: 'app-1', toStageId: interview.id },
-      LATER,
-    );
+    const detail = repo.transitionJobApplication({ id: 'app-1', toStageId: interview.id }, LATER);
     expect(detail.stageId).toBe(interview.id);
 
     // A terminal stage can never be the source of an allowed edge.
@@ -302,7 +309,13 @@ describe('job application lifecycle', () => {
 
     // Archiving a stage blocks transitions into it.
     repo.updateApplicationStage(
-      { id: rejected.id, name: rejected.name, position: rejected.position, terminal: true, archived: true },
+      {
+        id: rejected.id,
+        name: rejected.name,
+        position: rejected.position,
+        terminal: true,
+        archived: true,
+      },
       LATER,
     );
     expect(() =>
@@ -310,7 +323,9 @@ describe('job application lifecycle', () => {
     ).toThrow('Cannot transition into an archived stage');
 
     // Failed attempts mutated nothing: history and audit only grew on success.
-    expect(Number(core.scalar('SELECT COUNT(*) FROM application_stage_history'))).toBe(historyBefore + 1);
+    expect(Number(core.scalar('SELECT COUNT(*) FROM application_stage_history'))).toBe(
+      historyBefore + 1,
+    );
     expect(Number(core.scalar('SELECT COUNT(*) FROM audit_log'))).toBeGreaterThan(auditBefore);
     core.close();
   });
@@ -324,9 +339,9 @@ describe('job application lifecycle', () => {
     const screen = stageByName(stages, 'Screen');
     addApplication(repo, 'app-1', applied.id, NOW);
     repo.transitionJobApplication({ id: 'app-1', toStageId: screen.id }, LATER);
-    expect(() => core.run("UPDATE application_stage_history SET note='tampered' WHERE 1=1")).toThrow(
-      'append-only',
-    );
+    expect(() =>
+      core.run("UPDATE application_stage_history SET note='tampered' WHERE 1=1"),
+    ).toThrow('append-only');
     expect(() => core.run('DELETE FROM application_stage_history')).toThrow('append-only');
     expect(Number(core.scalar('SELECT COUNT(*) FROM application_stage_history'))).toBe(2);
 
@@ -354,16 +369,30 @@ describe('application relationships', () => {
     addApplication(repo, 'app-1', applied.id, NOW);
 
     let detail = repo.linkApplicationContact(
-      { applicationId: 'app-1', contactId: 'contact-jane', relationship: 'Hiring manager', primary: true },
+      {
+        applicationId: 'app-1',
+        contactId: 'contact-jane',
+        relationship: 'Hiring manager',
+        primary: true,
+      },
       NOW,
     );
     expect(detail.contacts).toEqual([
-      expect.objectContaining({ id: 'contact-jane', relationship: 'Hiring manager', primary: true }),
+      expect.objectContaining({
+        id: 'contact-jane',
+        relationship: 'Hiring manager',
+        primary: true,
+      }),
     ]);
 
     // Promoting a second contact must demote the first (at most one primary).
     detail = repo.linkApplicationContact(
-      { applicationId: 'app-1', contactId: 'contact-john', relationship: 'Recruiter', primary: true },
+      {
+        applicationId: 'app-1',
+        contactId: 'contact-john',
+        relationship: 'Recruiter',
+        primary: true,
+      },
       LATER,
     );
     expect(detail.contacts.map((contact) => [contact.id, contact.primary])).toEqual([
@@ -373,7 +402,12 @@ describe('application relationships', () => {
 
     // Re-linking updates the relationship in place.
     detail = repo.linkApplicationContact(
-      { applicationId: 'app-1', contactId: 'contact-jane', relationship: 'Second interviewer', primary: false },
+      {
+        applicationId: 'app-1',
+        contactId: 'contact-jane',
+        relationship: 'Second interviewer',
+        primary: false,
+      },
       LATER,
     );
     expect(detail.contacts.find((contact) => contact.id === 'contact-jane')).toMatchObject({
@@ -381,7 +415,10 @@ describe('application relationships', () => {
       primary: false,
     });
 
-    detail = repo.unlinkApplicationContact({ applicationId: 'app-1', contactId: 'contact-john' }, LATER);
+    detail = repo.unlinkApplicationContact(
+      { applicationId: 'app-1', contactId: 'contact-john' },
+      LATER,
+    );
     expect(detail.contacts.map((contact) => contact.id)).toEqual(['contact-jane']);
     core.close();
   });
@@ -404,11 +441,14 @@ describe('application relationships', () => {
       NOW,
     );
     expect(detail.threads).toEqual([
-      expect.objectContaining({ providerThreadId: 'thread-1', subjectSnapshot: 'Interview reminder' }),
+      expect.objectContaining({
+        providerThreadId: 'thread-1',
+        subjectSnapshot: 'Interview reminder',
+      }),
     ]);
-    expect(() =>
-      repo.linkApplicationThread({ ...thread, subjectSnapshot: null }, LATER),
-    ).toThrow('Thread is already linked to this application');
+    expect(() => repo.linkApplicationThread({ ...thread, subjectSnapshot: null }, LATER)).toThrow(
+      'Thread is already linked to this application',
+    );
     detail = repo.unlinkApplicationThread(thread, LATER);
     expect(detail.threads).toEqual([]);
     core.close();
@@ -424,14 +464,23 @@ describe('application notes and tasks', () => {
     const applied = stageByName(stages, 'Applied');
     addApplication(repo, 'app-1', applied.id, NOW);
 
-    const note = repo.createApplicationNote({ id: 'note-1', applicationId: 'app-1', body: 'Follow up next week' }, NOW);
+    const note = repo.createApplicationNote(
+      { id: 'note-1', applicationId: 'app-1', body: 'Follow up next week' },
+      NOW,
+    );
     expect(note).toMatchObject({ id: 'note-1', body: 'Follow up next week' });
     expect(repo.updateApplicationNote({ id: 'note-1', body: 'Follow up Monday' }, LATER).body).toBe(
       'Follow up Monday',
     );
 
     const task = repo.createApplicationTask(
-      { id: 'task-1', applicationId: 'app-1', title: 'Send thank-you', notes: 'After interview', dueAt: LATER },
+      {
+        id: 'task-1',
+        applicationId: 'app-1',
+        title: 'Send thank-you',
+        notes: 'After interview',
+        dueAt: LATER,
+      },
       NOW,
     );
     expect(task).toMatchObject({ title: 'Send thank-you', status: 'open', dueAt: LATER });
@@ -499,10 +548,22 @@ describe('application list cursor and filters', () => {
     addApplication(repo, 'app-2', screen.id, NOW);
     repo.createApplicationTask({ id: 'task-open', applicationId: 'app-1', title: 'Call' }, NOW);
 
-    expect(repo.listJobApplications({ limit: 10, query: 'Engineer app-2' }).applications.map((app) => app.id)).toEqual(['app-2']);
-    expect(repo.listJobApplications({ limit: 10, stageIds: [applied.id] }).applications.map((app) => app.id)).toEqual(['app-1']);
-    expect(repo.listJobApplications({ limit: 10, companyId: 'company-acme' }).applications).toHaveLength(2);
-    expect(repo.listJobApplications({ limit: 10, taskStatus: 'open' }).applications.map((app) => app.id)).toEqual(['app-1']);
+    expect(
+      repo
+        .listJobApplications({ limit: 10, query: 'Engineer app-2' })
+        .applications.map((app) => app.id),
+    ).toEqual(['app-2']);
+    expect(
+      repo
+        .listJobApplications({ limit: 10, stageIds: [applied.id] })
+        .applications.map((app) => app.id),
+    ).toEqual(['app-1']);
+    expect(
+      repo.listJobApplications({ limit: 10, companyId: 'company-acme' }).applications,
+    ).toHaveLength(2);
+    expect(
+      repo.listJobApplications({ limit: 10, taskStatus: 'open' }).applications.map((app) => app.id),
+    ).toEqual(['app-1']);
     expect(repo.listJobApplications({ limit: 10, taskStatus: 'done' }).applications).toEqual([]);
     core.close();
   });
@@ -516,7 +577,12 @@ describe('application-bound drafts', () => {
     addContact(repo, 'contact-jane', 'jane@acme.example', NOW);
     addApplication(repo, 'app-1', applied.id, NOW);
     repo.linkApplicationContact(
-      { applicationId: 'app-1', contactId: 'contact-jane', relationship: 'Hiring manager', primary: true },
+      {
+        applicationId: 'app-1',
+        contactId: 'contact-jane',
+        relationship: 'Hiring manager',
+        primary: true,
+      },
       NOW,
     );
     return { applied };
@@ -555,6 +621,37 @@ describe('application-bound drafts', () => {
     core.close();
   });
 
+  it('refuses to orphan immutable application draft context', () => {
+    const core = vault();
+    const repo = new OutreachrRepository(core);
+    seeded(repo);
+    repo.createApplicationDraft(
+      {
+        id: 'draft-1',
+        applicationId: 'app-1',
+        contactId: 'contact-jane',
+        provider: 'google',
+        accountEmail: 'founder@example.test',
+        kind: 'initial',
+        subject: 'Thank you for the interview',
+        bodyText: 'Dear Jane, thank you for your time.',
+      },
+      NOW,
+    );
+
+    expect(() => core.run('DELETE FROM contacts WHERE id=?', ['contact-jane'])).toThrow(
+      'cannot delete a contact linked to an application draft',
+    );
+    expect(() => core.run('DELETE FROM job_applications WHERE id=?', ['app-1'])).toThrow();
+    expect(
+      core.one<{ application_id: string; application_contact_id: string }>(
+        'SELECT application_id,application_contact_id FROM messages WHERE id=?',
+        ['draft-1'],
+      ),
+    ).toEqual({ application_id: 'app-1', application_contact_id: 'contact-jane' });
+    core.close();
+  });
+
   it('rejects unlinked contacts, missing primary email, and inconsistent kind/thread pairs', () => {
     const core = vault();
     const repo = new OutreachrRepository(core);
@@ -575,15 +672,20 @@ describe('application-bound drafts', () => {
       NOW,
     );
     repo.linkApplicationContact(
-      { applicationId: 'app-1', contactId: 'contact-unlinked', relationship: 'Recruiter', primary: false },
+      {
+        applicationId: 'app-1',
+        contactId: 'contact-unlinked',
+        relationship: 'Recruiter',
+        primary: false,
+      },
       NOW,
     );
     expect(() =>
       repo.createApplicationDraft({ ...base, contactId: 'contact-unlinked', kind: 'initial' }, NOW),
     ).toThrow('Draft contact must have a primary email');
-    expect(() =>
-      repo.createApplicationDraft({ ...base, kind: 'reply' }, NOW),
-    ).toThrow('A reply draft requires a provider thread');
+    expect(() => repo.createApplicationDraft({ ...base, kind: 'reply' }, NOW)).toThrow(
+      'A reply draft requires a provider thread',
+    );
     expect(() =>
       repo.createApplicationDraft({ ...base, kind: 'initial', threadId: 'thread-1' }, NOW),
     ).toThrow('cannot be attached to a provider thread');
@@ -593,7 +695,7 @@ describe('application-bound drafts', () => {
   it('enforces one owned application context and immutable draft context', () => {
     const core = vault();
     const repo = new OutreachrRepository(core);
-    const { applied } = seeded(repo);
+    seeded(repo);
     repo.createApplicationDraft(
       {
         id: 'draft-1',
@@ -659,7 +761,9 @@ describe('v10 migration from a v9 vault', () => {
     const migrated = new CoreVault(SQL, { bytes, appliedAt: LATER });
     expect(migrated.schemaVersion).toBe(SCHEMA_VERSION);
     expect(Number(migrated.scalar('SELECT COUNT(*) FROM schema_migrations'))).toBe(SCHEMA_VERSION);
-    const columns = migrated.all<{ name: string }>('PRAGMA table_info(messages)').map((column) => column.name);
+    const columns = migrated
+      .all<{ name: string }>('PRAGMA table_info(messages)')
+      .map((column) => column.name);
     expect(columns).toEqual(
       expect.arrayContaining(['application_id', 'application_contact_id', 'reply_to_message_id']),
     );

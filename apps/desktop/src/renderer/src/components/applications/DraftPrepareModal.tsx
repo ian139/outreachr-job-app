@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import type { ApplicationThreadLink, ConnectorProvider, Contact, DraftMessage } from '../../../../shared/contracts';
+import type {
+  ApplicationThreadLink,
+  ConnectorProvider,
+  Contact,
+  DraftMessage,
+} from '../../../../shared/contracts';
 import { Button, Dialog, TextField } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
@@ -22,7 +27,7 @@ export function DraftPrepareModal({
   threads: ApplicationThreadLink[];
   onCreated?: (draft: DraftMessage) => void;
 }): React.JSX.Element | null {
-  const { data, command, notify } = useWorkspace();
+  const { data, command } = useWorkspace();
 
   // Filter contacts with email
   const validContacts = contacts.filter((c) => Boolean(c.primaryEmail));
@@ -36,7 +41,9 @@ export function DraftPrepareModal({
   const defaultEmail = connectedAccounts[0]?.email ?? data?.workspaceProfile?.primaryEmail ?? '';
 
   const [contactId, setContactId] = useState(primaryContact?.id ?? '');
-  const [provider, setProvider] = useState<ConnectorProvider>(connectedAccounts[0]?.provider ?? 'google');
+  const [provider, setProvider] = useState<ConnectorProvider>(
+    connectedAccounts[0]?.provider ?? 'google',
+  );
   const [accountEmail, setAccountEmail] = useState(defaultEmail);
   const [kind, setKind] = useState<'initial' | 'reply'>(threads.length > 0 ? 'reply' : 'initial');
   const [subject, setSubject] = useState(
@@ -46,7 +53,7 @@ export function DraftPrepareModal({
   );
   const [bodyText, setBodyText] = useState('');
   const [threadId, setThreadId] = useState(threads[0]?.providerThreadId ?? '');
-  const [replyToMessageId, setReplyToMessageId] = useState('');
+  const [replyToMessageId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +65,15 @@ export function DraftPrepareModal({
     }
     if (!accountEmail.trim()) {
       setError('Account email is required. Please select or enter a connected sender email.');
+      return;
+    }
+    if (
+      connectedAccounts.length > 0 &&
+      !connectedAccounts.some(
+        (account) => account.provider === provider && account.email === accountEmail,
+      )
+    ) {
+      setError('Select a sender account connected to the chosen provider.');
       return;
     }
     if (!subject.trim()) {
@@ -113,9 +129,24 @@ export function DraftPrepareModal({
         </div>
       }
     >
-      <form id="draft-prepare-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <form
+        id="draft-prepare-form"
+        onSubmit={(e) => {
+          void handleSubmit(e);
+        }}
+        style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+      >
         {error ? (
-          <div role="alert" style={{ color: '#991b1b', backgroundColor: '#fef2f2', padding: '0.5rem', borderRadius: '0.375rem', fontSize: '0.875rem' }}>
+          <div
+            role="alert"
+            style={{
+              color: '#991b1b',
+              backgroundColor: '#fef2f2',
+              padding: '0.5rem',
+              borderRadius: '0.375rem',
+              fontSize: '0.875rem',
+            }}
+          >
             {error}
           </div>
         ) : null}
@@ -125,7 +156,15 @@ export function DraftPrepareModal({
             Recipient Contact <span style={{ color: '#dc2626' }}>*</span>
           </label>
           {validContacts.length === 0 ? (
-            <div style={{ fontSize: '0.8125rem', color: '#991b1b', backgroundColor: '#fef2f2', padding: '0.5rem', borderRadius: '0.375rem' }}>
+            <div
+              style={{
+                fontSize: '0.8125rem',
+                color: '#991b1b',
+                backgroundColor: '#fef2f2',
+                padding: '0.5rem',
+                borderRadius: '0.375rem',
+              }}
+            >
               No linked contacts have an email address. Link a contact with an email address first.
             </div>
           ) : (
@@ -146,21 +185,33 @@ export function DraftPrepareModal({
         </div>
 
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <div
+            style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}
+          >
             <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>
               Provider
             </label>
             <select
               className="filter-select"
+              aria-label="Provider"
               value={provider}
-              onChange={(e) => setProvider(e.target.value as ConnectorProvider)}
+              onChange={(e) => {
+                const nextProvider = e.target.value as ConnectorProvider;
+                setProvider(nextProvider);
+                setAccountEmail(
+                  connectedAccounts.find((account) => account.provider === nextProvider)?.email ??
+                    '',
+                );
+              }}
             >
               <option value="google">Google Workspace</option>
               <option value="microsoft">Microsoft 365</option>
             </select>
           </div>
 
-          <div style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <div
+            style={{ flex: '1 1 180px', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}
+          >
             <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>
               Draft Kind
             </label>
@@ -183,11 +234,18 @@ export function DraftPrepareModal({
             <select
               className="filter-select"
               aria-label="Select sender account email"
-              value={accountEmail}
-              onChange={(e) => setAccountEmail(e.target.value)}
+              value={`${provider}:${accountEmail}`}
+              onChange={(e) => {
+                const account = connectedAccounts.find(
+                  (candidate) => `${candidate.provider}:${candidate.email}` === e.target.value,
+                );
+                if (!account) return;
+                setProvider(account.provider);
+                setAccountEmail(account.email);
+              }}
             >
-              {connectedAccounts.map((acc, idx) => (
-                <option key={idx} value={acc.email}>
+              {connectedAccounts.map((acc) => (
+                <option key={`${acc.provider}:${acc.email}`} value={`${acc.provider}:${acc.email}`}>
                   {acc.provider.toUpperCase()}: {acc.email}
                 </option>
               ))}

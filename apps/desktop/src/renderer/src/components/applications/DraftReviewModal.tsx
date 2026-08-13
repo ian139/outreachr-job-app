@@ -139,8 +139,23 @@ export function DraftReviewModal({
         </div>
 
         {/* Application Context Banner */}
-        <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.5rem', padding: '0.75rem', fontSize: '0.875rem' }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#166534', textTransform: 'uppercase' }}>
+        <div
+          style={{
+            backgroundColor: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: '0.5rem',
+            padding: '0.75rem',
+            fontSize: '0.875rem',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: '#166534',
+              textTransform: 'uppercase',
+            }}
+          >
             Application Context
           </div>
           <div style={{ fontWeight: 700, color: '#0f172a', marginTop: '0.125rem' }}>
@@ -186,7 +201,14 @@ export function DraftReviewModal({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: '#64748b',
+              textTransform: 'uppercase',
+            }}
+          >
             Subject
           </span>
           <div style={{ fontWeight: 700, fontSize: '0.9375rem', color: '#0f172a' }}>
@@ -195,7 +217,14 @@ export function DraftReviewModal({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
-          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+          <span
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: '#64748b',
+              textTransform: 'uppercase',
+            }}
+          >
             Message Body
           </span>
           <div className="draft-body-preview">{draft.bodyText}</div>

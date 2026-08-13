@@ -73,9 +73,22 @@ export function LinkContactModal({
           </div>
         }
       >
-        <form id="link-contact-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form
+          id="link-contact-form"
+          onSubmit={handleSubmit}
+          style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+        >
           {error ? (
-            <div role="alert" style={{ color: '#991b1b', backgroundColor: '#fef2f2', padding: '0.5rem', borderRadius: '0.375rem', fontSize: '0.875rem' }}>
+            <div
+              role="alert"
+              style={{
+                color: '#991b1b',
+                backgroundColor: '#fef2f2',
+                padding: '0.5rem',
+                borderRadius: '0.375rem',
+                fontSize: '0.875rem',
+              }}
+            >
               {error}
             </div>
           ) : null}
@@ -85,7 +98,12 @@ export function LinkContactModal({
               <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>
                 Contact <span style={{ color: '#dc2626' }}>*</span>
               </label>
-              <Button type="button" tone="quiet" size="small" onClick={() => setShowCreateContact(true)}>
+              <Button
+                type="button"
+                tone="quiet"
+                size="small"
+                onClick={() => setShowCreateContact(true)}
+              >
                 + New contact
               </Button>
             </div>
@@ -99,7 +117,8 @@ export function LinkContactModal({
               <option value="">Select a contact...</option>
               {contacts.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} {c.title ? `(${c.title})` : ''} {c.primaryEmail ? `- ${c.primaryEmail}` : ''}
+                  {c.name} {c.title ? `(${c.title})` : ''}{' '}
+                  {c.primaryEmail ? `- ${c.primaryEmail}` : ''}
                 </option>
               ))}
             </select>
@@ -113,7 +132,17 @@ export function LinkContactModal({
             placeholder="e.g. Recruiter, Hiring Manager, Interviewer"
           />
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: '#334155', cursor: 'pointer', minHeight: '44px' }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.875rem',
+              color: '#334155',
+              cursor: 'pointer',
+              minHeight: '44px',
+            }}
+          >
             <input
               type="checkbox"
               style={{ width: '1.25rem', height: '1.25rem', accentColor: '#0d9488' }}

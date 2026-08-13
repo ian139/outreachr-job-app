@@ -587,6 +587,26 @@ export const ApplicationDraftCreateSchema = z
   });
 export type ApplicationDraftCreateInput = z.input<typeof ApplicationDraftCreateSchema>;
 
+function isCanonicalBase64(value: string): boolean {
+  if (value.length === 0 || value.length % 4 !== 0) return false;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  const contentLength = value.length - padding;
+  for (let index = 0; index < contentLength; index += 1) {
+    const code = value.charCodeAt(index);
+    const allowed =
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      code === 43 ||
+      code === 47;
+    if (!allowed) return false;
+  }
+  for (let index = contentLength; index < value.length; index += 1) {
+    if (value.charCodeAt(index) !== 61) return false;
+  }
+  return true;
+}
+
 export const BackupEnvelopeSchema = z.object({
   format: z.literal('outreachr-encrypted-backup'),
   version: z.literal(1),
@@ -613,7 +633,7 @@ export const BackupEnvelopeSchema = z.object({
     .string()
     .min(1)
     .max(715_827_884)
-    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u),
+    .refine(isCanonicalBase64, 'Invalid base64 ciphertext'),
 });
 export type BackupEnvelope = z.infer<typeof BackupEnvelopeSchema>;
 

@@ -395,7 +395,6 @@ function mapGmailThreadSummary(
   };
 }
 
-
 function mapGmailMessageBody(
   message: GmailMessageJson,
   accountEmail: string,
@@ -613,7 +612,7 @@ export class GoogleConnector
     const response = await this.#request(
       'gmail.messages.list',
       url.toString(),
-      undefined,
+      { signal: input.signal },
       false,
       true,
     );

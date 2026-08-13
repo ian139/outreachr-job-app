@@ -471,7 +471,9 @@ describe('Microsoft Graph mail and calendar connector', () => {
               subject: 'Job Application update',
               bodyPreview: 'Thank you for your application',
               from: { emailAddress: { address: 'hr@bigtech.com', name: 'BigTech HR' } },
-              toRecipients: [{ emailAddress: { address: 'applicant@example.com', name: 'Applicant' } }],
+              toRecipients: [
+                { emailAddress: { address: 'applicant@example.com', name: 'Applicant' } },
+              ],
               receivedDateTime: '2026-08-05T12:00:00Z',
               webLink: 'https://outlook.office.com/mail/id/ms-msg-1',
             },
@@ -482,9 +484,9 @@ describe('Microsoft Graph mail and calendar connector', () => {
     );
 
     const connector = client();
-    await expect(connector.listMailboxThreads({ accountEmail: 'applicant@example.com', pageSize: 100 })).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      connector.listMailboxThreads({ accountEmail: 'applicant@example.com', pageSize: 100 }),
+    ).rejects.toThrow(TypeError);
 
     const result = await connector.listMailboxThreads({
       accountEmail: 'applicant@example.com',
@@ -520,10 +522,29 @@ describe('Microsoft Graph mail and calendar connector', () => {
     ).rejects.toMatchObject({
       code: 'INVALID_REQUEST',
     });
+
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageToken: 'https://graph.microsoft.com/v1.0/me/calendar/events?$skiptoken=opaque',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+    });
+
+    await expect(
+      connector.listMailboxThreads({
+        accountEmail: 'applicant@example.com',
+        pageToken: 'not-a-url',
+      }),
+    ).rejects.toMatchObject({
+      code: 'INVALID_REQUEST',
+    });
   });
 
   it('gets Microsoft mailbox thread with plain/HTML, pre/table/quoted, direction, webLink, cancellation, and truncation', async () => {
-    const htmlBody = '<table><tr><td>Salary</td></tr></table><pre>log output</pre><a href="https://example.com/long">Link</a>';
+    const htmlBody =
+      '<table><tr><td>Salary</td></tr></table><pre>log output</pre><a href="https://example.com/long">Link</a>';
     const hugeContent = 'B'.repeat(1_048_576 + 100);
 
     server.use(
@@ -538,7 +559,9 @@ describe('Microsoft Graph mail and calendar connector', () => {
                 conversationId: 'conv-202',
                 subject: 'Interview Schedule',
                 from: { emailAddress: { address: 'applicant@example.com', name: 'Applicant' } },
-                toRecipients: [{ emailAddress: { address: 'interviewer@bigtech.com', name: 'Interviewer' } }],
+                toRecipients: [
+                  { emailAddress: { address: 'interviewer@bigtech.com', name: 'Interviewer' } },
+                ],
                 sentDateTime: '2026-08-06T09:00:00Z',
                 parentFolderId: 'sentitems',
                 webLink: 'https://outlook.office.com/mail/id/msg-ms-outbound',
@@ -594,7 +617,9 @@ describe('Microsoft Graph mail and calendar connector', () => {
     });
 
     expect(hugeResult.messages[0].providerTruncated).toBe(true);
-    expect(hugeResult.messages[0].truncationReason).toBe('Body content exceeds maximum allowed size');
+    expect(hugeResult.messages[0].truncationReason).toBe(
+      'Body content exceeds maximum allowed size',
+    );
     expect(hugeResult.messages[0].bodyText?.length).toBe(1_048_576);
 
     const controller = new AbortController();
@@ -621,9 +646,9 @@ describe('Microsoft Graph mail and calendar connector', () => {
     const connector = client();
 
     // Input validation errors
-    await expect(
-      connector.listMailboxThreads({ accountEmail: 'bad-email' }),
-    ).rejects.toThrow('Account email is invalid');
+    await expect(connector.listMailboxThreads({ accountEmail: 'bad-email' })).rejects.toThrow(
+      'Account email is invalid',
+    );
 
     await expect(
       connector.listMailboxThreads({

@@ -589,13 +589,9 @@ export class CommandService {
         case 'draft.create': {
           const value = payload as CommandMap['draft.create'];
           if ('applicationId' in value) {
-            result = await this.#vault.createApplicationDraft(
-              value as Parameters<VaultService['createApplicationDraft']>[0],
-            );
+            result = await this.#vault.createApplicationDraft(value);
           } else {
-            result = await this.#vault.createDraft(
-              value as Parameters<VaultService['createDraft']>[0],
-            );
+            result = await this.#vault.createDraft(value);
           }
           break;
         }
@@ -640,9 +636,7 @@ export class CommandService {
           );
           break;
         case 'application.list':
-          result = await this.#vault.listJobApplications(
-            payload as CommandMap['application.list'],
-          );
+          result = await this.#vault.listJobApplications(payload as CommandMap['application.list']);
           break;
         case 'application.update':
           result = await this.#vault.updateJobApplication(

@@ -17,6 +17,15 @@ export function validateMailboxListInput(input: ListMailboxMessagesInput): void 
     throw new TypeError('Mailbox selection must be all or sent');
   }
   if (
+    input.pageToken !== undefined &&
+    (typeof input.pageToken !== 'string' ||
+      !input.pageToken.trim() ||
+      input.pageToken.length > 4096 ||
+      /[\r\n]/u.test(input.pageToken))
+  ) {
+    throw new TypeError('Mailbox page token is invalid');
+  }
+  if (
     input.pageSize !== undefined &&
     (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 250)
   ) {

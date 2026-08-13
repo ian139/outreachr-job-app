@@ -203,7 +203,6 @@ export interface MailThreadListPage {
   nextCursor: string | null;
 }
 
-
 export interface MoneyRange {
   currency: 'USD';
   minimum: number | null;
@@ -583,7 +582,10 @@ export interface CommandMap {
   'contact.create': Pick<Contact, 'companyId' | 'name' | 'title' | 'primaryEmail'>;
   'contact.update': Pick<Contact, 'id' | 'companyId' | 'name' | 'title' | 'primaryEmail'>;
   'applicationStage.create': Pick<ApplicationStage, 'name' | 'position' | 'terminal'>;
-  'applicationStage.update': Pick<ApplicationStage, 'id' | 'name' | 'position' | 'terminal' | 'archived'>;
+  'applicationStage.update': Pick<
+    ApplicationStage,
+    'id' | 'name' | 'position' | 'terminal' | 'archived'
+  >;
   'applicationStage.transition.set': {
     fromStageId: string;
     toStageId: string;
@@ -699,13 +701,7 @@ export interface CommandMap {
   };
   'draft.create': Pick<
     DraftMessage,
-    | 'applicationId'
-    | 'contactId'
-    | 'provider'
-    | 'accountEmail'
-    | 'kind'
-    | 'subject'
-    | 'bodyText'
+    'applicationId' | 'contactId' | 'provider' | 'accountEmail' | 'kind' | 'subject' | 'bodyText'
   > & {
     threadId?: string | null;
     replyToMessageId?: string | null;

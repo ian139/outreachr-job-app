@@ -23,7 +23,9 @@ export function ApplicationsPage({
   const [query, setQuery] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [companyFilter, setCompanyFilter] = useState('');
-  const [taskStatusFilter, setTaskStatusFilter] = useState<ApplicationTask['status'] | 'all'>('all');
+  const [taskStatusFilter, setTaskStatusFilter] = useState<ApplicationTask['status'] | 'all'>(
+    'all',
+  );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -70,7 +72,9 @@ export function ApplicationsPage({
       </header>
 
       {/* Main Content Layout */}
-      <div className={`applications-main-layout ${selectedId ? 'applications-main-layout--split' : ''}`}>
+      <div
+        className={`applications-main-layout ${selectedId ? 'applications-main-layout--split' : ''}`}
+      >
         {/* Left / Primary Pane */}
         <div className="applications-primary-pane">
           {viewMode === 'records' ? (

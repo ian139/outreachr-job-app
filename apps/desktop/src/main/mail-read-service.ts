@@ -1,4 +1,3 @@
-import type { ConnectorProvider } from '@outreachr/connectors';
 import type {
   GetMailThreadRequest,
   ListMailThreadsRequest,
@@ -139,10 +138,7 @@ export class MailReadService {
     this.#activeRequests.set(request.requestId, controller);
 
     try {
-      const connector = this.#connectors.getMailConnector(
-        request.provider,
-        request.accountEmail,
-      );
+      const connector = this.#connectors.getMailConnector(request.provider, request.accountEmail);
 
       if (typeof connector.listMailboxThreads !== 'function') {
         throw new Error(
@@ -169,21 +165,30 @@ export class MailReadService {
 
       return {
         threads: rawThreads.map((thread) => ({
-          provider: thread.provider,
+          provider: request.provider,
           accountEmail: request.accountEmail,
           threadId: validateBoundedId(thread.threadId, 'threadId', true)!,
           subject: validateBoundedString(thread.subject ?? '', 'subject', 4096, false) ?? '',
-          snippet: thread.snippet ? validateBoundedString(thread.snippet, 'snippet', 4096, false) ?? null : null,
-          participants: (Array.isArray(thread.participants) ? thread.participants : []).map(mapParticipant),
+          snippet: thread.snippet
+            ? (validateBoundedString(thread.snippet, 'snippet', 4096, false) ?? null)
+            : null,
+          participants: (Array.isArray(thread.participants) ? thread.participants : []).map(
+            mapParticipant,
+          ),
           latestAt: validateTimestamp(thread.latestAt, 'latestAt'),
-          messageCount: typeof thread.messageCount === 'number' && thread.messageCount >= 0 ? thread.messageCount : 0,
+          messageCount:
+            typeof thread.messageCount === 'number' && thread.messageCount >= 0
+              ? thread.messageCount
+              : 0,
           sourceUrl: validateSourceUrl(thread.sourceUrl),
         })),
-        nextCursor: page.nextPageToken ? validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null : null,
+        nextCursor: page.nextPageToken
+          ? (validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null)
+          : null,
       };
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error('Request cancelled');
+        throw new Error('Request cancelled', { cause: error });
       }
       throw error;
     } finally {
@@ -206,10 +211,7 @@ export class MailReadService {
     this.#activeRequests.set(request.requestId, controller);
 
     try {
-      const connector = this.#connectors.getMailConnector(
-        request.provider,
-        request.accountEmail,
-      );
+      const connector = this.#connectors.getMailConnector(request.provider, request.accountEmail);
 
       if (typeof connector.getMailboxThread !== 'function') {
         throw new Error(
@@ -236,18 +238,26 @@ export class MailReadService {
 
       return {
         thread: {
-          provider: page.thread.provider,
+          provider: request.provider,
           accountEmail: request.accountEmail,
           threadId: validateBoundedId(page.thread.threadId, 'threadId', true)!,
           subject: validateBoundedString(page.thread.subject ?? '', 'subject', 4096, false) ?? '',
-          snippet: page.thread.snippet ? validateBoundedString(page.thread.snippet, 'snippet', 4096, false) ?? null : null,
-          participants: (Array.isArray(page.thread.participants) ? page.thread.participants : []).map(mapParticipant),
+          snippet: page.thread.snippet
+            ? (validateBoundedString(page.thread.snippet, 'snippet', 4096, false) ?? null)
+            : null,
+          participants: (Array.isArray(page.thread.participants)
+            ? page.thread.participants
+            : []
+          ).map(mapParticipant),
           latestAt: validateTimestamp(page.thread.latestAt, 'latestAt'),
-          messageCount: typeof page.thread.messageCount === 'number' && page.thread.messageCount >= 0 ? page.thread.messageCount : 0,
+          messageCount:
+            typeof page.thread.messageCount === 'number' && page.thread.messageCount >= 0
+              ? page.thread.messageCount
+              : 0,
           sourceUrl: validateSourceUrl(page.thread.sourceUrl),
         },
         messages: rawMessages.map((msg) => ({
-          provider: msg.provider,
+          provider: request.provider,
           accountEmail: request.accountEmail,
           threadId: validateBoundedId(msg.threadId, 'threadId', true)!,
           messageId: validateBoundedId(msg.id, 'messageId', true)!,
@@ -257,20 +267,27 @@ export class MailReadService {
           to: (msg.to ?? []).map(mapEmailAddress),
           cc: (msg.cc ?? []).map(mapEmailAddress),
           occurredAt: validateTimestamp(msg.occurredAt, 'occurredAt'),
-          labels: (Array.isArray(msg.labels) ? msg.labels : []).map((l) => validateBoundedString(l, 'label', 100, true)!),
-          direction: msg.direction === 'inbound' || msg.direction === 'outbound' ? msg.direction : null,
+          labels: (Array.isArray(msg.labels) ? msg.labels : []).map((l) =>
+            validateBoundedString(l, 'label', 100, true)!,
+          ),
+          direction:
+            msg.direction === 'inbound' || msg.direction === 'outbound' ? msg.direction : null,
           bodyText: validateBodyString(msg.bodyText, 'bodyText'),
           bodyHtml: validateBodyString(msg.bodyHtml, 'bodyHtml'),
           providerTruncated: Boolean(msg.providerTruncated),
-          truncationReason: msg.truncationReason ? validateBoundedString(msg.truncationReason, 'truncationReason', 1000, false) ?? null : null,
+          truncationReason: msg.truncationReason
+            ? (validateBoundedString(msg.truncationReason, 'truncationReason', 1000, false) ?? null)
+            : null,
           sourceUrl: validateSourceUrl(msg.sourceUrl),
           fetchedAt: validateTimestamp(msg.fetchedAt, 'fetchedAt'),
         })),
-        nextCursor: page.nextPageToken ? validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null : null,
+        nextCursor: page.nextPageToken
+          ? (validateBoundedString(page.nextPageToken, 'nextPageToken', 4096, false) ?? null)
+          : null,
       };
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error('Request cancelled');
+        throw new Error('Request cancelled', { cause: error });
       }
       throw error;
     } finally {
@@ -312,7 +329,9 @@ export class MailReadService {
       throw new Error(`Unsupported or invalid provider: ${String(request.provider)}`);
     }
     if (typeof request.accountEmail !== 'string' || !isValidEmail(request.accountEmail)) {
-      throw new Error('accountEmail must be a valid email address up to 320 characters without CRLF');
+      throw new Error(
+        'accountEmail must be a valid email address up to 320 characters without CRLF',
+      );
     }
     if (
       typeof request.limit !== 'number' ||
@@ -342,7 +361,9 @@ export class MailReadService {
       throw new Error(`Unsupported or invalid provider: ${String(request.provider)}`);
     }
     if (typeof request.accountEmail !== 'string' || !isValidEmail(request.accountEmail)) {
-      throw new Error('accountEmail must be a valid email address up to 320 characters without CRLF');
+      throw new Error(
+        'accountEmail must be a valid email address up to 320 characters without CRLF',
+      );
     }
     validateBoundedString(request.threadId, 'threadId', 4096, true);
     if (

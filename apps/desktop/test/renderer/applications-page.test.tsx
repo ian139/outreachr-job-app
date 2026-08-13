@@ -1,10 +1,17 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { HashRouter } from '../../src/renderer/src/lib/router';
 import { WorkspaceProvider } from '../../src/renderer/src/state/WorkspaceContext';
 import { ApplicationsPage } from '../../src/renderer/src/pages/ApplicationsPage';
 import { bootstrapFixture, installBridge } from './fixtures';
-import type { ApplicationDetail, ApplicationSummary, Company, Contact, DraftMessage, OutreachrBridge } from '../../src/shared/contracts';
+import type {
+  ApplicationDetail,
+  ApplicationSummary,
+  Company,
+  Contact,
+  DraftMessage,
+  OutreachrBridge,
+} from '../../src/shared/contracts';
 
 function renderApplicationsPage(props = {}): void {
   window.location.hash = '#/applications';
@@ -127,8 +134,24 @@ describe('Applications Page & Detailed Components', () => {
     fixture.companies = [mockCompany];
     fixture.contacts = [mockContact];
     fixture.applicationStages = [
-      { id: 'stage-applied', name: 'Applied', position: 1, terminal: false, archived: false, createdAt: '', updatedAt: '' },
-      { id: 'stage-interview', name: 'Interview', position: 2, terminal: false, archived: false, createdAt: '', updatedAt: '' },
+      {
+        id: 'stage-applied',
+        name: 'Applied',
+        position: 1,
+        terminal: false,
+        archived: false,
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'stage-interview',
+        name: 'Interview',
+        position: 2,
+        terminal: false,
+        archived: false,
+        createdAt: '',
+        updatedAt: '',
+      },
     ];
     fixture.applications = [mockSummary];
 
@@ -150,11 +173,18 @@ describe('Applications Page & Detailed Components', () => {
 
     // Check application item listed
     expect(await screen.findByText('Software Engineer')).toBeVisible();
-    expect(screen.getAllByText('Acme Corp').some((element) => element.offsetParent !== null || element.tagName === 'SPAN')).toBe(true);
+    expect(
+      screen
+        .getAllByText('Acme Corp')
+        .some((element) => element.offsetParent !== null || element.tagName === 'SPAN'),
+    ).toBe(true);
 
     // Switch view mode to Pipeline
     fireEvent.click(screen.getByRole('button', { name: 'Pipeline' }));
-    expect(screen.getByRole('button', { name: 'Pipeline' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Pipeline' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     expect(screen.getByText('Applied')).toBeVisible();
   });
 
@@ -163,8 +193,24 @@ describe('Applications Page & Detailed Components', () => {
     fixture.companies = [mockCompany];
     fixture.contacts = [mockContact];
     fixture.applicationStages = [
-      { id: 'stage-applied', name: 'Applied', position: 1, terminal: false, archived: false, createdAt: '', updatedAt: '' },
-      { id: 'stage-interview', name: 'Interview', position: 2, terminal: false, archived: false, createdAt: '', updatedAt: '' },
+      {
+        id: 'stage-applied',
+        name: 'Applied',
+        position: 1,
+        terminal: false,
+        archived: false,
+        createdAt: '',
+        updatedAt: '',
+      },
+      {
+        id: 'stage-interview',
+        name: 'Interview',
+        position: 2,
+        terminal: false,
+        archived: false,
+        createdAt: '',
+        updatedAt: '',
+      },
     ];
     fixture.applications = [mockSummary];
 
@@ -262,10 +308,38 @@ describe('Applications Page & Detailed Components', () => {
     fixture.companies = [mockCompany];
     fixture.contacts = [mockContact];
     fixture.applicationStages = [
-      { id: 'stage-applied', name: 'Applied', position: 1, terminal: false, archived: false, createdAt: '', updatedAt: '' },
+      {
+        id: 'stage-applied',
+        name: 'Applied',
+        position: 1,
+        terminal: false,
+        archived: false,
+        createdAt: '',
+        updatedAt: '',
+      },
     ];
     fixture.applications = [mockSummary];
-    fixture.drafts = [mockDraft];
+    fixture.drafts = [
+      mockDraft,
+      {
+        ...mockDraft,
+        id: 'draft-other-application',
+        applicationId: 'app-other',
+        subject: 'Unrelated application draft',
+      },
+    ];
+    fixture.connectors = [
+      {
+        ...fixture.connectors[0]!,
+        state: 'connected',
+        accountEmail: 'google@example.com',
+      },
+      {
+        ...fixture.connectors[1]!,
+        state: 'connected',
+        accountEmail: 'microsoft@example.com',
+      },
+    ];
 
     const approvedDraft: DraftMessage = {
       ...mockDraft,
@@ -303,6 +377,16 @@ describe('Applications Page & Detailed Components', () => {
     // Select application to open details
     fireEvent.click(await screen.findByText('Software Engineer'));
     expect(await screen.findByRole('button', { name: 'Prepare reply' })).toBeVisible();
+    expect(screen.queryByText('Unrelated application draft')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare reply' }));
+    const prepareDialog = await screen.findByRole('dialog', { name: 'Prepare reply' });
+    fireEvent.change(within(prepareDialog).getByLabelText('Provider'), {
+      target: { value: 'microsoft' },
+    });
+    expect(within(prepareDialog).getByLabelText('Select sender account email')).toHaveValue(
+      'microsoft:microsoft@example.com',
+    );
+    fireEvent.click(within(prepareDialog).getByRole('button', { name: 'Cancel' }));
 
     // Review draft button
     expect(screen.getByRole('button', { name: 'Review draft' })).toBeVisible();
@@ -312,7 +396,9 @@ describe('Applications Page & Detailed Components', () => {
     expect(await screen.findByRole('heading', { name: 'Review draft' })).toBeVisible();
     expect(screen.getByText('Software Engineer at Acme Corp')).toBeVisible();
     expect(screen.getAllByText('Re: Interview invitation').length).toBeGreaterThan(0);
-    expect(screen.getByText('Thank you for reaching out. Friday at 2pm works great for me.')).toBeVisible();
+    expect(
+      screen.getByText('Thank you for reaching out. Friday at 2pm works great for me.'),
+    ).toBeVisible();
 
     // Explicit Approve
     const approveBtn = screen.getByRole('button', { name: 'Approve draft' });

@@ -95,13 +95,42 @@ interface GraphEventJson {
   webLink?: string;
 }
 
-
 const defaultNow = (): Date => new Date();
 
 function trimTrailingSlash(value: string): string {
   let end = value.length;
   while (end > 0 && value[end - 1] === '/') end -= 1;
   return value.slice(0, end);
+}
+
+function microsoftMailPageUrl(
+  pageToken: string,
+  graphBaseUrl: string,
+  operation: string,
+  allowedPaths: readonly string[],
+): URL {
+  let url: URL;
+  try {
+    url = new URL(pageToken);
+  } catch (cause) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation,
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token was not a valid URL',
+      cause,
+    });
+  }
+  const base = new URL(graphBaseUrl);
+  if (url.origin !== base.origin || !allowedPaths.includes(url.pathname)) {
+    throw new ConnectorError({
+      provider: 'microsoft',
+      operation,
+      code: 'INVALID_REQUEST',
+      message: 'Microsoft mail page token did not point to the expected Graph mail collection',
+    });
+  }
+  return url;
 }
 
 function graphRecipient(address: EmailAddress): GraphRecipient {
@@ -272,9 +301,7 @@ function mapGraphMessage(
   const internetMessageId =
     typeof message.internetMessageId === 'string'
       ? message.internetMessageId
-      : headers.find(
-          (header) => header.name?.toLocaleLowerCase('en-US') === 'message-id',
-        )?.value;
+      : headers.find((header) => header.name?.toLocaleLowerCase('en-US') === 'message-id')?.value;
   return {
     provider: 'microsoft',
     id,
@@ -321,7 +348,8 @@ function mapGraphThreadSummary(
   const participants = deduplicateAddresses(allAddresses);
 
   const subject = mappedMsgs.find((m) => m.subject.trim())?.subject ?? firstMsg.subject ?? '';
-  const snippet = msgs.find((m) => typeof m.bodyPreview === 'string' && m.bodyPreview.trim())?.bodyPreview ?? '';
+  const snippet =
+    msgs.find((m) => typeof m.bodyPreview === 'string' && m.bodyPreview.trim())?.bodyPreview ?? '';
 
   let latestAt = firstMsg.occurredAt;
   for (const m of mappedMsgs) {
@@ -331,7 +359,8 @@ function mapGraphThreadSummary(
   }
 
   const firstWebLink = msgs.find((m) => typeof m.webLink === 'string' && m.webLink.trim())?.webLink;
-  const sourceUrl = firstWebLink ?? `https://outlook.office.com/mail/id/${encodeURIComponent(threadId)}`;
+  const sourceUrl =
+    firstWebLink ?? `https://outlook.office.com/mail/id/${encodeURIComponent(threadId)}`;
 
   return {
     provider: 'microsoft',
@@ -352,7 +381,10 @@ function mapGraphMessageBody(
   fetchedAt: string,
 ): MailboxMessageBody | undefined {
   let direction: MailboxMessage['direction'] = undefined;
-  if (typeof message.parentFolderId === 'string' && message.parentFolderId.toLowerCase().includes('sent')) {
+  if (
+    typeof message.parentFolderId === 'string' &&
+    message.parentFolderId.toLowerCase().includes('sent')
+  ) {
     direction = 'outbound';
   }
   const base = mapGraphMessage(message, direction);
@@ -379,9 +411,10 @@ function mapGraphMessageBody(
     }
   }
 
-  const sourceUrl = typeof message.webLink === 'string' && message.webLink.trim()
-    ? message.webLink
-    : `https://outlook.office.com/mail/id/${encodeURIComponent(base.id)}`;
+  const sourceUrl =
+    typeof message.webLink === 'string' && message.webLink.trim()
+      ? message.webLink
+      : `https://outlook.office.com/mail/id/${encodeURIComponent(base.id)}`;
 
   return {
     ...base,
@@ -552,16 +585,11 @@ export class MicrosoftConnector
     validateMailboxListInput(input);
     let url: URL;
     if (input.pageToken) {
-      url = new URL(input.pageToken);
       const base = new URL(this.#graphBaseUrl);
-      if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
-        throw new ConnectorError({
-          provider: this.provider,
-          operation: 'graph.messages.list',
-          code: 'INVALID_REQUEST',
-          message: 'Microsoft mail page token did not point to the configured Graph endpoint',
-        });
-      }
+      url = microsoftMailPageUrl(input.pageToken, this.#graphBaseUrl, 'graph.messages.list', [
+        `${base.pathname}/me/messages`,
+        `${base.pathname}/me/mailFolders/sentitems/messages`,
+      ]);
     } else {
       url = new URL(
         input.mailbox === 'sent'
@@ -582,7 +610,10 @@ export class MicrosoftConnector
     const response = await this.#request(
       'graph.messages.list',
       url.toString(),
-      { headers: { Prefer: 'outlook.body-content-type="text", IdType="ImmutableId"' } },
+      {
+        headers: { Prefer: 'outlook.body-content-type="text", IdType="ImmutableId"' },
+        signal: input.signal,
+      },
       false,
       true,
     );
@@ -607,16 +638,10 @@ export class MicrosoftConnector
 
     let url: URL;
     if (input.pageToken) {
-      url = new URL(input.pageToken);
       const base = new URL(this.#graphBaseUrl);
-      if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
-        throw new ConnectorError({
-          provider: this.provider,
-          operation: 'graph.threads.list',
-          code: 'INVALID_REQUEST',
-          message: 'Microsoft mail page token did not point to the configured Graph endpoint',
-        });
-      }
+      url = microsoftMailPageUrl(input.pageToken, this.#graphBaseUrl, 'graph.threads.list', [
+        `${base.pathname}/me/messages`,
+      ]);
     } else {
       url = new URL(`${this.#graphBaseUrl}/me/messages`);
       url.searchParams.set(
@@ -680,16 +705,10 @@ export class MicrosoftConnector
 
     let url: URL;
     if (input.pageToken) {
-      url = new URL(input.pageToken);
       const base = new URL(this.#graphBaseUrl);
-      if (url.origin !== base.origin || !url.pathname.startsWith(`${base.pathname}/`)) {
-        throw new ConnectorError({
-          provider: this.provider,
-          operation: 'graph.threads.get',
-          code: 'INVALID_REQUEST',
-          message: 'Microsoft mail page token did not point to the configured Graph endpoint',
-        });
-      }
+      url = microsoftMailPageUrl(input.pageToken, this.#graphBaseUrl, 'graph.threads.get', [
+        `${base.pathname}/me/messages`,
+      ]);
     } else {
       url = new URL(`${this.#graphBaseUrl}/me/messages`);
       url.searchParams.set('$filter', `conversationId eq '${input.threadId.replace(/'/g, "''")}'`);
@@ -769,7 +788,11 @@ export class MicrosoftConnector
       }
     }
 
-    const threadSummary = mapGraphThreadSummary(rawMessages, input.accountEmail, input.threadId) ?? {
+    const threadSummary = mapGraphThreadSummary(
+      rawMessages,
+      input.accountEmail,
+      input.threadId,
+    ) ?? {
       provider: 'microsoft',
       accountEmail: input.accountEmail,
       threadId: input.threadId,

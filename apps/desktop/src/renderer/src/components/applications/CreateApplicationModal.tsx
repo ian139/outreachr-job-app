@@ -54,7 +54,11 @@ export function CreateApplicationModal({
         appliedAt: appliedAt ? new Date(appliedAt).toISOString() : null,
         nextEventAt: nextEventAt ? new Date(nextEventAt).toISOString() : null,
       });
-      notify({ tone: 'success', title: 'Application created', detail: `${created.role} at ${created.companyName}` });
+      notify({
+        tone: 'success',
+        title: 'Application created',
+        detail: `${created.role} at ${created.companyName}`,
+      });
       setRole('');
       setSourceUrl('');
       setAppliedAt('');
@@ -86,9 +90,22 @@ export function CreateApplicationModal({
           </div>
         }
       >
-        <form id="create-app-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form
+          id="create-app-form"
+          onSubmit={handleSubmit}
+          style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+        >
           {error ? (
-            <div role="alert" style={{ color: '#991b1b', backgroundColor: '#fef2f2', padding: '0.5rem', borderRadius: '0.375rem', fontSize: '0.875rem' }}>
+            <div
+              role="alert"
+              style={{
+                color: '#991b1b',
+                backgroundColor: '#fef2f2',
+                padding: '0.5rem',
+                borderRadius: '0.375rem',
+                fontSize: '0.875rem',
+              }}
+            >
               {error}
             </div>
           ) : null}
@@ -98,7 +115,12 @@ export function CreateApplicationModal({
               <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>
                 Company <span style={{ color: '#dc2626' }}>*</span>
               </label>
-              <Button type="button" tone="quiet" size="small" onClick={() => setShowCompanyModal(true)}>
+              <Button
+                type="button"
+                tone="quiet"
+                size="small"
+                onClick={() => setShowCompanyModal(true)}
+              >
                 + New company
               </Button>
             </div>
@@ -127,9 +149,7 @@ export function CreateApplicationModal({
           />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>
-              Stage
-            </label>
+            <label style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>Stage</label>
             <select
               className="filter-select"
               aria-label="Select stage"

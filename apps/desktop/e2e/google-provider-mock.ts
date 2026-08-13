@@ -92,7 +92,9 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<plain-text@techcorp.test>' },
             ],
             body: {
-              data: Buffer.from('Plain text body content for senior software engineer interview.').toString('base64url'),
+              data: Buffer.from(
+                'Plain text body content for senior software engineer interview.',
+              ).toString('base64url'),
             },
           },
         },
@@ -117,7 +119,9 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<offer@acme.test>' },
             ],
             body: {
-              data: Buffer.from('<p>Welcome to Acme Corp!</p><script>alert("xss")</script><style>body { color: red; }</style><a href="https://acme.test/careers">View Careers</a>').toString('base64url'),
+              data: Buffer.from(
+                '<p>Welcome to Acme Corp!</p><script>alert("xss")</script><style>body { color: red; }</style><a href="https://acme.test/careers">View Careers</a>',
+              ).toString('base64url'),
             },
           },
         },
@@ -142,7 +146,9 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<quoted@acme.test>' },
             ],
             body: {
-              data: Buffer.from('<div>Thank you for sending your resume. We would love to set up an interview.</div><blockquote type="cite"><div>On Mon, Jan 5, 2026, Ada Candidate wrote:</div><div>Submitting application for Senior Engineer role.</div></blockquote>').toString('base64url'),
+              data: Buffer.from(
+                '<div>Thank you for sending your resume. We would love to set up an interview.</div><blockquote type="cite"><div>On Mon, Jan 5, 2026, Ada Candidate wrote:</div><div>Submitting application for Senior Engineer role.</div></blockquote>',
+              ).toString('base64url'),
             },
           },
         },
@@ -167,7 +173,13 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<portal@acme.test>' },
             ],
             body: {
-              data: Buffer.from('<p>Please access your portal at: <a href="https://example.test/portal/' + 'a'.repeat(600) + '">https://example.test/portal/' + 'a'.repeat(600) + '</a></p>').toString('base64url'),
+              data: Buffer.from(
+                '<p>Please access your portal at: <a href="https://example.test/portal/' +
+                  'a'.repeat(600) +
+                  '">https://example.test/portal/' +
+                  'a'.repeat(600) +
+                  '</a></p>',
+              ).toString('base64url'),
             },
           },
         },
@@ -192,7 +204,9 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<tech-sample@acme.test>' },
             ],
             body: {
-              data: Buffer.from('<div>Code structure:</div><pre>function test() {\n  return true;\n}</pre><table><thead><tr><th>Role</th><th>Salary</th></tr></thead><tbody><tr><td>Staff Engineer</td><td>$220,000</td></tr></tbody></table>').toString('base64url'),
+              data: Buffer.from(
+                '<div>Code structure:</div><pre>function test() {\n  return true;\n}</pre><table><thead><tr><th>Role</th><th>Salary</th></tr></thead><tbody><tr><td>Staff Engineer</td><td>$220,000</td></tr></tbody></table>',
+              ).toString('base64url'),
             },
           },
         },
@@ -241,7 +255,7 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Date', value: 'Tue, 07 Jan 2026 12:00:00 GMT' },
               { name: 'Message-ID', value: '<truncated@acme.test>' },
             ],
-            body: { data: Buffer.from('Message body truncated by provider').toString('base64url') },
+            body: { data: Buffer.alloc(1_048_577, 65).toString('base64url') },
           },
         },
       ],
@@ -265,6 +279,52 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Message-ID', value: '<slow@acme.test>' },
             ],
             body: { data: Buffer.from('Delayed response body content.').toString('base64url') },
+          },
+        },
+      ],
+    },
+    'thread-error': {
+      id: 'thread-error',
+      historyId: '1009',
+      messages: [
+        {
+          id: 'msg-error',
+          threadId: 'thread-error',
+          internalDate: '1736380800000',
+          snippet: 'Provider Error Failure',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: 'Provider Monitor <monitor@acme.test>' },
+              { name: 'To', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'Subject', value: 'Provider Error Failure' },
+              { name: 'Date', value: 'Thu, 09 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<provider-error@acme.test>' },
+            ],
+            body: { data: Buffer.from('This full-body request must fail.').toString('base64url') },
+          },
+        },
+      ],
+    },
+    'outbound-page-two': {
+      id: 'outbound-page-two',
+      historyId: '1010',
+      messages: [
+        {
+          id: 'outbound-page-two',
+          threadId: 'outbound-page-two',
+          internalDate: '1736467200000',
+          snippet: 'Historical page two',
+          payload: {
+            mimeType: 'text/plain',
+            headers: [
+              { name: 'From', value: `Ada Candidate <${googleAccount}>` },
+              { name: 'To', value: 'History <history@acme.test>' },
+              { name: 'Subject', value: 'Historical page two' },
+              { name: 'Date', value: 'Fri, 10 Jan 2026 12:00:00 GMT' },
+              { name: 'Message-ID', value: '<history-page-two@acme.test>' },
+            ],
+            body: { data: Buffer.from('Historical page two').toString('base64url') },
           },
         },
       ],
@@ -352,11 +412,17 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
       }
       return HttpResponse.json({
         threads: [
-          { id: 'thread-plain-text', snippet: 'Plain text body content for senior software engineer interview.' },
+          {
+            id: 'thread-plain-text',
+            snippet: 'Plain text body content for senior software engineer interview.',
+          },
           { id: 'thread-sanitized-html', snippet: 'Welcome to Acme Corp! View Careers details.' },
           { id: 'thread-quoted-reply', snippet: 'Thank you for sending your resume...' },
           { id: 'thread-long-url', snippet: 'Please complete your application portal access...' },
-          { id: 'thread-pre-table', snippet: 'Technical Interview Code Sample and Compensation Table' },
+          {
+            id: 'thread-pre-table',
+            snippet: 'Technical Interview Code Sample and Compensation Table',
+          },
           { id: 'thread-empty', snippet: '' },
           { id: 'thread-error', snippet: 'Provider Error Failure' },
           { id: 'thread-truncated', snippet: 'Diagnostic Export Attachment' },
@@ -369,7 +435,10 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
       const denied = requireAccessToken(request);
       if (denied) return denied;
       const threadId = String(params.threadId);
-      if (threadId === 'thread-error') {
+      if (
+        threadId === 'thread-error' &&
+        new URL(request.url).searchParams.get('format') !== 'metadata'
+      ) {
         return HttpResponse.json({ error: 'Internal provider failure' }, { status: 500 });
       }
       if (threadId === 'thread-stale') {

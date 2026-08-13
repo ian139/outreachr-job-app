@@ -62,9 +62,7 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
       [...primaryNavigation, { to: '/settings', label: 'Settings' }]
         .sort((left, right) => right.to.length - left.to.length)
         .find(
-          (item) =>
-            location.pathname === item.to ||
-            location.pathname.startsWith(`${item.to}/`),
+          (item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`),
         )?.label ?? 'Workspace';
     document.title = `${pageName} · Outreachr Job Applications`;
 
@@ -75,7 +73,6 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [location.pathname]);
-
 
   return (
     <div className={sidebarCollapsed ? 'app-shell app-shell--collapsed' : 'app-shell'}>
@@ -108,7 +105,6 @@ export function AppShell({ children }: PropsWithChildren): React.JSX.Element {
             {sidebarCollapsed ? <Menu aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
           </IconButton>
         </div>
-
 
         <button
           className="command-trigger"

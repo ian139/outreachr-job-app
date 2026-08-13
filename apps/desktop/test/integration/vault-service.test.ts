@@ -1208,7 +1208,8 @@ describe('VaultService with the production investor seed', () => {
     expect((await service.bootstrap()).drafts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          personId: person.id,
+          recipientEmail: 'proposal-draft@example.test',
+          recipientName: person.name,
           kind: 'initial',
           approvalState: 'draft',
           subject: 'Founder review only',

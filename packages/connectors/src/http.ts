@@ -35,13 +35,27 @@ export interface AuthorizedRequestOptions {
 const defaultSleep: Sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+function abortReason(signal?: AbortSignal): Error {
+  const reason: unknown = signal?.reason;
+  if (reason instanceof Error) {
+    return reason;
+  }
+  if (typeof reason === 'string' && reason.trim().length > 0) {
+    return new Error(reason);
+  }
+  if (reason !== undefined && reason !== null) {
+    return new Error('Aborted with a non-Error reason', { cause: reason });
+  }
+  return new Error('Aborted');
+}
+
 const cancellableSleep = (
   milliseconds: number,
   signal?: AbortSignal,
   customSleep?: Sleep,
 ): Promise<void> => {
   if (signal?.aborted) {
-    return Promise.reject(signal.reason ?? new Error('Aborted'));
+    return Promise.reject(abortReason(signal));
   }
   if (!signal) {
     return (customSleep ?? defaultSleep)(milliseconds);
@@ -49,7 +63,7 @@ const cancellableSleep = (
   return new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(signal.reason ?? new Error('Aborted'));
+      reject(abortReason(signal));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
@@ -138,7 +152,7 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
   const ambiguousWriteKind = options.isSend ? 'send' : options.isCreate ? 'create' : null;
   for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
     if (options.init?.signal?.aborted) {
-      throw options.init.signal.reason ?? new Error('Aborted');
+      throw abortReason(options.init.signal);
     }
     let response: Response;
     try {
@@ -153,7 +167,11 @@ export async function authorizedRequest(options: AuthorizedRequestOptions): Prom
         options.init?.signal?.aborted ||
         (cause instanceof Error && cause.name === 'AbortError')
       ) {
-        throw cause;
+        throw cause instanceof Error
+          ? cause
+          : options.init?.signal
+            ? abortReason(options.init.signal)
+            : new Error(String(cause));
       }
       if (options.retryNetworkErrors && attempt < policy.maxAttempts) {
         await cancellableSleep(

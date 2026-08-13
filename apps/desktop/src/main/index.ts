@@ -32,7 +32,6 @@ import { ElectronSecretStoreBackend, SecureStore } from './secure-store';
 import { VaultService } from './vault-service';
 import { MailReadService } from './mail-read-service';
 
-
 let mainWindow: BrowserWindow | null = null;
 let vaultService: VaultService | null = null;
 let agentService: DesktopAgentService | null = null;
@@ -128,7 +127,6 @@ async function createWindow(
     if (mainWindow === window) mainWindow = null;
   });
 
-
   if (!ipcRegistered) {
     ipcRegistered = true;
     ipcMain.handle(IPC_CHANNELS.bootstrap, (event) => {
@@ -206,32 +204,22 @@ async function createWindow(
         if (error) throw new Error(error);
       },
     );
-    ipcMain.handle(
-      IPC_CHANNELS.listMailThreads,
-      (event, request: ListMailThreadsRequest) => {
-        assertTrustedIpcSender(event);
-        if (!mailReadService) throw new Error('Mail read service is not initialized');
-        return mailReadService.listMailThreads(request);
-      },
-    );
-    ipcMain.handle(
-      IPC_CHANNELS.getMailThread,
-      (event, request: GetMailThreadRequest) => {
-        assertTrustedIpcSender(event);
-        if (!mailReadService) throw new Error('Mail read service is not initialized');
-        return mailReadService.getMailThread(request);
-      },
-    );
-    ipcMain.handle(
-      IPC_CHANNELS.cancelMailRequest,
-      (event, requestId: string) => {
-        assertTrustedIpcSender(event);
-        if (!mailReadService) throw new Error('Mail read service is not initialized');
-        return mailReadService.cancelMailRequest(requestId);
-      },
-    );
+    ipcMain.handle(IPC_CHANNELS.listMailThreads, (event, request: ListMailThreadsRequest) => {
+      assertTrustedIpcSender(event);
+      if (!mailReadService) throw new Error('Mail read service is not initialized');
+      return mailReadService.listMailThreads(request);
+    });
+    ipcMain.handle(IPC_CHANNELS.getMailThread, (event, request: GetMailThreadRequest) => {
+      assertTrustedIpcSender(event);
+      if (!mailReadService) throw new Error('Mail read service is not initialized');
+      return mailReadService.getMailThread(request);
+    });
+    ipcMain.handle(IPC_CHANNELS.cancelMailRequest, (event, requestId: string) => {
+      assertTrustedIpcSender(event);
+      if (!mailReadService) throw new Error('Mail read service is not initialized');
+      return mailReadService.cancelMailRequest(requestId);
+    });
   }
-
 
   if (launchHooks.developmentRendererUrl) await window.loadURL(launchHooks.developmentRendererUrl);
   else await window.loadFile(rendererEntry);

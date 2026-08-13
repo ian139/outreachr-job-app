@@ -1,6 +1,6 @@
 /* eslint-disable no-empty-pattern -- Playwright requires fixture dependencies to use object destructuring. */
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron, expect, test as base } from '@playwright/test';
@@ -114,10 +114,12 @@ export async function attachScreenshot(
   testInfo: TestInfo,
   name: string,
 ): Promise<void> {
+  const body = await page.screenshot({ animations: 'disabled' });
   await testInfo.attach(name, {
-    body: await page.screenshot({ animations: 'disabled' }),
+    body,
     contentType: 'image/png',
   });
+  await writeFile(testInfo.outputPath(`${name}.png`), body);
 }
 export async function setupJobWorkspace(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -270,18 +272,24 @@ export async function measureControlSizes(
   }
   return results;
 }
-export async function measureAllVisibleControls(
-  page: Page,
-): Promise<ControlSizeMeasurement[]> {
+export async function measureAllVisibleControls(page: Page): Promise<ControlSizeMeasurement[]> {
   const elements = await page.locator('button, a[href], input, select, textarea').all();
   const results: ControlSizeMeasurement[] = [];
   for (const element of elements) {
     if (await element.isVisible()) {
       const box = await element.boundingBox();
       if (box && box.width > 0 && box.height > 0) {
-        const text = (await element.textContent())?.trim() || (await element.getAttribute('aria-label')) || '';
+        const tagName = await element.evaluate((node) => node.tagName.toLowerCase());
+        const text =
+          (await element.textContent())?.trim() ||
+          (await element.getAttribute('aria-label')) ||
+          (await element.getAttribute('title')) ||
+          '';
+        const role = (await element.getAttribute('role')) || tagName;
+        const type = await element.getAttribute('type');
         results.push({
-          name: text.slice(0, 40),
+          role,
+          name: `${text.slice(0, 40)} [${tagName}${type ? `:${type}` : ''}]`,
           width: box.width,
           height: box.height,
           meetsTouchTarget: box.width >= 44 && box.height >= 44,

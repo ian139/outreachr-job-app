@@ -1,5 +1,5 @@
-import type { ApplicationSummary, ApplicationTask } from '../../../../shared/contracts';
-import { Badge, Button, EmptyState, formatDate } from '../ui';
+import type { ApplicationTask } from '../../../../shared/contracts';
+import { EmptyState, formatDate } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
 export function ApplicationsPipeline({
@@ -7,8 +7,6 @@ export function ApplicationsPipeline({
   onSelect,
   query,
   companyFilter,
-  taskStatusFilter,
-  onOpenCreate,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -63,15 +61,20 @@ export function ApplicationsPipeline({
         return (
           <div key={stage.id} className="pipeline-column">
             <div className="pipeline-column__header">
-              <span className="pipeline-column__title">
-                {stage.name}
-              </span>
+              <span className="pipeline-column__title">{stage.name}</span>
               <span className="pipeline-column__count">{stageApps.length}</span>
             </div>
 
             <div className="pipeline-column__cards">
               {stageApps.length === 0 ? (
-                <div style={{ fontSize: '0.8125rem', color: '#94a3b8', textAlign: 'center', padding: '1rem 0' }}>
+                <div
+                  style={{
+                    fontSize: '0.8125rem',
+                    color: '#94a3b8',
+                    textAlign: 'center',
+                    padding: '1rem 0',
+                  }}
+                >
                   No applications
                 </div>
               ) : (
@@ -106,16 +109,20 @@ export function ApplicationsPipeline({
                         ) : null}
                       </div>
 
-                      <div
-                        style={{ marginTop: '0.25rem' }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      <div style={{ marginTop: '0.25rem' }} onClick={(e) => e.stopPropagation()}>
                         <select
                           className="filter-select"
                           aria-label={`Change stage for ${app.role} at ${app.companyName}`}
-                          style={{ minHeight: '36px', fontSize: '0.75rem', padding: '0.25rem 0.5rem', width: '100%' }}
+                          style={{
+                            minHeight: '36px',
+                            fontSize: '0.75rem',
+                            padding: '0.25rem 0.5rem',
+                            width: '100%',
+                          }}
                           value={app.stageId}
-                          onChange={(e) => moveStage(app.id, e.target.value)}
+                          onChange={(e) => {
+                            void moveStage(app.id, e.target.value);
+                          }}
                         >
                           {stages.map((s) => (
                             <option key={s.id} value={s.id}>

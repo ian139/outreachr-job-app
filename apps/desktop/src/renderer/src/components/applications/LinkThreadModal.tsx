@@ -72,9 +72,22 @@ export function LinkThreadModal({
         </div>
       }
     >
-      <form id="link-thread-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <form
+        id="link-thread-form"
+        onSubmit={handleSubmit}
+        style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+      >
         {error ? (
-          <div role="alert" style={{ color: '#991b1b', backgroundColor: '#fef2f2', padding: '0.5rem', borderRadius: '0.375rem', fontSize: '0.875rem' }}>
+          <div
+            role="alert"
+            style={{
+              color: '#991b1b',
+              backgroundColor: '#fef2f2',
+              padding: '0.5rem',
+              borderRadius: '0.375rem',
+              fontSize: '0.875rem',
+            }}
+          >
             {error}
           </div>
         ) : null}

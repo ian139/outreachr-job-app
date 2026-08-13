@@ -219,7 +219,6 @@ export interface MailboxThreadMessagesPage {
   nextPageToken?: string;
 }
 
-
 export interface ListMailboxMessagesInput {
   /** Only messages at or after this ISO timestamp are requested. Omit for all history. */
   since?: string;
@@ -232,6 +231,7 @@ export interface ListMailboxMessagesInput {
   pageSize?: number;
   /** Opaque value returned by a previous call. */
   pageToken?: string;
+  signal?: AbortSignal;
 }
 
 export interface MailboxMessagePage {

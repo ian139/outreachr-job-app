@@ -9,6 +9,31 @@ export function bootstrapFixture(firstRun = false): AppBootstrap {
     isFirstRun: firstRun,
     seedVersion: '0.1.0',
     seedSignatureStatus: 'pinned unsigned research',
+    workspaceProfile: firstRun
+      ? null
+      : {
+          id: 'workspace:test',
+          displayName: 'Test Job Search',
+          primaryEmail: 'applicant@example.test',
+          createdAt: '2026-07-31T19:00:00.000Z',
+          updatedAt: '2026-07-31T19:00:00.000Z',
+        },
+    companies: [],
+    contacts: [],
+    applicationStages: firstRun
+      ? []
+      : [
+          {
+            id: 'stage:applied',
+            name: 'Applied',
+            position: 0,
+            terminal: false,
+            archived: false,
+            createdAt: '2026-07-31T19:00:00.000Z',
+            updatedAt: '2026-07-31T19:00:00.000Z',
+          },
+        ],
+    applications: [],
     round: firstRun
       ? null
       : {

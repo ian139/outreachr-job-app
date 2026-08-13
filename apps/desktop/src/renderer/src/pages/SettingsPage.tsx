@@ -1104,16 +1104,31 @@ export function SettingsPage(): React.JSX.Element {
     'active',
   );
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
-    const stored = window.localStorage.getItem('outreachr.theme');
-    return stored === 'dark' || stored === 'system' ? stored : 'light';
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = window.localStorage.getItem('outreachr.theme');
+        return stored === 'dark' || stored === 'system' ? stored : 'light';
+      }
+    } catch {
+      // Non-persistent fallback when window.localStorage is undefined or throws
+    }
+    return 'light';
   });
   const encryptionAvailable = useMemo(
     () => data?.connectors.every((item) => item.encryptionAvailable) ?? false,
     [data],
   );
   useEffect(() => {
-    window.localStorage.setItem('outreachr.theme', theme);
-    document.documentElement.dataset.theme = theme;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('outreachr.theme', theme);
+      }
+    } catch {
+      // Non-persistent fallback when window.localStorage is undefined or throws
+    }
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.dataset.theme = theme;
+    }
   }, [theme]);
   if (!data) return <></>;
 

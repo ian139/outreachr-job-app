@@ -1275,8 +1275,8 @@ CREATE INDEX application_tasks_application_status_idx
 
 -- Application-bound drafts carry exactly one owned job-application context.
 -- Legacy fundraising drafts stay readable with both columns NULL.
-ALTER TABLE messages ADD COLUMN application_id TEXT REFERENCES job_applications(id) ON DELETE SET NULL;
-ALTER TABLE messages ADD COLUMN application_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN application_id TEXT REFERENCES job_applications(id) ON DELETE RESTRICT;
+ALTER TABLE messages ADD COLUMN application_contact_id TEXT REFERENCES contacts(id) ON DELETE RESTRICT;
 ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT
   CHECK(reply_to_message_id IS NULL OR length(trim(reply_to_message_id)) BETWEEN 1 AND 2000);
 CREATE INDEX messages_application_idx ON messages(application_id);
@@ -1316,11 +1316,11 @@ BEFORE UPDATE OF application_id,application_contact_id,reply_to_message_id ON me
 BEGIN
   SELECT RAISE(ABORT,'application draft context is immutable');
 END;
-CREATE TRIGGER contacts_clear_application_draft_binding
+CREATE TRIGGER contacts_restrict_application_draft_delete
 BEFORE DELETE ON contacts
+WHEN EXISTS (SELECT 1 FROM messages WHERE application_contact_id=OLD.id)
 BEGIN
-  UPDATE messages SET application_id=NULL,application_contact_id=NULL
-  WHERE application_contact_id=OLD.id;
+  SELECT RAISE(ABORT,'cannot delete a contact linked to an application draft');
 END;
 `,
   },

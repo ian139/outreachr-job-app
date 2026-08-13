@@ -8,7 +8,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ian139/outreachr-job-app.git"
+    "url": "git+https://github.com/lalalune/outreachr.git"
   },
   "type": "module",
   "main": "./out/main/index.js",

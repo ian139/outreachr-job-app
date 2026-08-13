@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ApplicationSummary, ApplicationTask, CommandMap } from '../../../../shared/contracts';
-import { Badge, Button, EmptyState, formatDate, SearchField, Skeleton } from '../ui';
+import { Button, EmptyState, formatDate, SearchField, Skeleton } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
 
 export function ApplicationsList({
@@ -38,43 +38,46 @@ export function ApplicationsList({
   const stages = data?.applicationStages ?? [];
   const companies = data?.companies ?? [];
 
-  const loadApplications = async (reset = true): Promise<void> => {
-    if (reset) setLoading(true);
-    else setLoadingMore(true);
-    setError(null);
+  const loadApplications = useCallback(
+    async (reset = true, cursorToUse?: string | null): Promise<void> => {
+      if (reset) setLoading(true);
+      else setLoadingMore(true);
+      setError(null);
 
-    try {
-      const payload: CommandMap['application.list'] = { limit: 20 };
-      const q = query.trim();
-      if (q) payload.query = q;
-      if (stageFilter) payload.stageIds = [stageFilter];
-      if (companyFilter) payload.companyId = companyFilter;
-      if (taskStatusFilter !== 'all') payload.taskStatus = taskStatusFilter;
-      if (!reset && nextCursor) payload.cursor = nextCursor;
+      try {
+        const payload: CommandMap['application.list'] = { limit: 20 };
+        const q = query.trim();
+        if (q) payload.query = q;
+        if (stageFilter) payload.stageIds = [stageFilter];
+        if (companyFilter) payload.companyId = companyFilter;
+        if (taskStatusFilter !== 'all') payload.taskStatus = taskStatusFilter;
+        if (!reset && cursorToUse) payload.cursor = cursorToUse;
 
-      const res = await command('application.list', payload);
+        const res = await command('application.list', payload);
 
-      if (reset) {
-        setApplications(res.applications);
-      } else {
-        setApplications((prev) => [...prev, ...res.applications]);
+        if (reset) {
+          setApplications(res.applications);
+        } else {
+          setApplications((prev) => [...prev, ...res.applications]);
+        }
+        setNextCursor(res.nextCursor);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load applications');
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
       }
-      setNextCursor(res.nextCursor);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load applications');
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
+    },
+    [command, companyFilter, query, stageFilter, taskStatusFilter],
+  );
 
   useEffect(() => {
-    loadApplications(true);
-  }, [query, stageFilter, companyFilter, taskStatusFilter, data?.applications]);
+    void loadApplications(true);
+  }, [loadApplications, data?.applications]);
 
   const handleLoadMore = (): void => {
     if (nextCursor && !loadingMore) {
-      loadApplications(false);
+      void loadApplications(false, nextCursor);
     }
   };
 
@@ -138,22 +141,43 @@ export function ApplicationsList({
 
       {/* Error state */}
       {error ? (
-        <div role="alert" style={{ color: '#991b1b', backgroundColor: '#fef2f2', padding: '1rem', borderRadius: '0.5rem' }}>
+        <div
+          role="alert"
+          style={{
+            color: '#991b1b',
+            backgroundColor: '#fef2f2',
+            padding: '1rem',
+            borderRadius: '0.5rem',
+          }}
+        >
           {error}
         </div>
       ) : null}
 
       {/* Loading state */}
       {loading ? (
-        <div className="applications-table-wrapper" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
-          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
-          <div style={{ height: '3rem', width: '100%' }}><Skeleton /></div>
+        <div
+          className="applications-table-wrapper"
+          style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}
+        >
+          <div style={{ height: '3rem', width: '100%' }}>
+            <Skeleton />
+          </div>
+          <div style={{ height: '3rem', width: '100%' }}>
+            <Skeleton />
+          </div>
+          <div style={{ height: '3rem', width: '100%' }}>
+            <Skeleton />
+          </div>
         </div>
       ) : applications.length === 0 ? (
         <EmptyState
           title="No applications found"
-          detail={query || stageFilter || companyFilter ? 'Try clearing filters or search term.' : 'Get started by tracking your first job application.'}
+          detail={
+            query || stageFilter || companyFilter
+              ? 'Try clearing filters or search term.'
+              : 'Get started by tracking your first job application.'
+          }
           action={
             <Button tone="primary" onClick={onOpenCreate}>
               New application
@@ -198,7 +222,9 @@ export function ApplicationsList({
                       <span className="stage-badge stage-badge--active">{app.stageName}</span>
                     </td>
                     <td>{app.appliedAt ? formatDate(app.appliedAt) : 'Not specified'}</td>
-                    <td>{app.nextEventAt ? formatDate(app.nextEventAt, true) : 'None scheduled'}</td>
+                    <td>
+                      {app.nextEventAt ? formatDate(app.nextEventAt, true) : 'None scheduled'}
+                    </td>
                     <td style={{ textAlign: 'right' }}>
                       <Button
                         tone="quiet"
@@ -219,11 +245,7 @@ export function ApplicationsList({
 
           {nextCursor ? (
             <div className="load-more-container">
-              <Button
-                tone="secondary"
-                loading={loadingMore}
-                onClick={handleLoadMore}
-              >
+              <Button tone="secondary" loading={loadingMore} onClick={handleLoadMore}>
                 Load more applications
               </Button>
             </div>

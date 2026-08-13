@@ -168,6 +168,29 @@ describe('Google Gmail and Calendar connector', () => {
     });
   });
 
+  it('forwards cancellation to legacy Gmail mailbox listing', async () => {
+    const controller = new AbortController();
+    const fetchWithSignal: typeof fetch = async (_input, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      return new Response(JSON.stringify({ messages: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    const connector = new GoogleConnector({
+      fetch: fetchWithSignal,
+      getAccessToken: async () => 'google-access-token',
+      sendLedger: ledger(),
+      retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+      sleep: noSleep,
+      now,
+    });
+
+    await expect(
+      connector.listMailboxMessages({ mailbox: 'all', signal: controller.signal }),
+    ).resolves.toEqual({ messages: [] });
+  });
+
   it('skips Gmail relationship records that have no sender or usable timestamp', async () => {
     server.use(
       http.get('https://gmail.googleapis.com/gmail/v1/users/me/messages', () =>
@@ -476,36 +499,39 @@ describe('Google Gmail and Calendar connector', () => {
           nextPageToken: 'page-2',
         });
       }),
-      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-101', ({ request }) => {
-        const url = new URL(request.url);
-        expect(url.searchParams.get('format')).toBe('metadata');
-        return HttpResponse.json({
-          id: 'thread-101',
-          snippet: 'Interview details inside',
-          messages: [
-            {
-              id: 'msg-1',
-              threadId: 'thread-101',
-              internalDate: '1770000000000',
-              labelIds: ['INBOX'],
-              payload: {
-                headers: [
-                  { name: 'From', value: 'Recruiter <recruiter@acme.com>' },
-                  { name: 'To', value: 'Candidate <user@example.com>' },
-                  { name: 'Subject', value: 'Interview with Acme' },
-                  { name: 'Date', value: 'Mon, 02 Feb 2026 10:00:00 GMT' },
-                ],
+      http.get(
+        'https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-101',
+        ({ request }) => {
+          const url = new URL(request.url);
+          expect(url.searchParams.get('format')).toBe('metadata');
+          return HttpResponse.json({
+            id: 'thread-101',
+            snippet: 'Interview details inside',
+            messages: [
+              {
+                id: 'msg-1',
+                threadId: 'thread-101',
+                internalDate: '1770000000000',
+                labelIds: ['INBOX'],
+                payload: {
+                  headers: [
+                    { name: 'From', value: 'Recruiter <recruiter@acme.com>' },
+                    { name: 'To', value: 'Candidate <user@example.com>' },
+                    { name: 'Subject', value: 'Interview with Acme' },
+                    { name: 'Date', value: 'Mon, 02 Feb 2026 10:00:00 GMT' },
+                  ],
+                },
               },
-            },
-          ],
-        });
-      }),
+            ],
+          });
+        },
+      ),
     );
 
     const connector = client();
-    await expect(connector.listMailboxThreads({ accountEmail: 'user@example.com', pageSize: 60 })).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      connector.listMailboxThreads({ accountEmail: 'user@example.com', pageSize: 60 }),
+    ).rejects.toThrow(TypeError);
 
     const result = await connector.listMailboxThreads({
       accountEmail: 'user@example.com',
@@ -535,73 +561,81 @@ describe('Google Gmail and Calendar connector', () => {
   });
 
   it('gets mailbox thread with recursive MIME decoding, attachment bodies, plain/HTML, pre/table/quoted, and cancellation', async () => {
-    const plainText = '> Quoted previous email\n\nHere is the job offer table:\n<table><tr><td>Role</td></tr></table>';
-    const htmlText = '<pre>Code snippet</pre><p><a href="https://example.com/very/long/url">Link</a></p>';
+    const plainText =
+      '> Quoted previous email\n\nHere is the job offer table:\n<table><tr><td>Role</td></tr></table>';
+    const htmlText =
+      '<pre>Code snippet</pre><p><a href="https://example.com/very/long/url">Link</a></p>';
 
     server.use(
-      http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-202', ({ request }) => {
-        const url = new URL(request.url);
-        expect(url.searchParams.get('format')).toBe('full');
-        return HttpResponse.json({
-          id: 'thread-202',
-          snippet: 'Offer details',
-          messages: [
-            {
-              id: 'msg-plain-html',
-              threadId: 'thread-202',
-              internalDate: '1770000100000',
-              labelIds: ['SENT'],
-              payload: {
-                mimeType: 'multipart/alternative',
-                headers: [
-                  { name: 'From', value: 'user@example.com' },
-                  { name: 'To', value: 'recruiter@acme.com' },
-                  { name: 'Subject', value: 'Re: Offer details' },
-                  { name: 'Message-ID', value: '<msg-202@acme.com>' },
-                  { name: 'X-Outreachr-Operation-Key', value: 'op-key-123' },
-                ],
-                parts: [
-                  {
-                    mimeType: 'text/plain',
-                    body: { data: utf8Base64Url(plainText) },
-                  },
-                  {
-                    mimeType: 'text/html',
-                    body: { data: utf8Base64Url(htmlText) },
-                  },
-                ],
+      http.get(
+        'https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-202',
+        ({ request }) => {
+          const url = new URL(request.url);
+          expect(url.searchParams.get('format')).toBe('full');
+          return HttpResponse.json({
+            id: 'thread-202',
+            snippet: 'Offer details',
+            messages: [
+              {
+                id: 'msg-plain-html',
+                threadId: 'thread-202',
+                internalDate: '1770000100000',
+                labelIds: ['SENT'],
+                payload: {
+                  mimeType: 'multipart/alternative',
+                  headers: [
+                    { name: 'From', value: 'user@example.com' },
+                    { name: 'To', value: 'recruiter@acme.com' },
+                    { name: 'Subject', value: 'Re: Offer details' },
+                    { name: 'Message-ID', value: '<msg-202@acme.com>' },
+                    { name: 'X-Outreachr-Operation-Key', value: 'op-key-123' },
+                  ],
+                  parts: [
+                    {
+                      mimeType: 'text/plain',
+                      body: { data: utf8Base64Url(plainText) },
+                    },
+                    {
+                      mimeType: 'text/html',
+                      body: { data: utf8Base64Url(htmlText) },
+                    },
+                  ],
+                },
               },
-            },
-            {
-              id: 'msg-attachment-body',
-              threadId: 'thread-202',
-              internalDate: '1770000200000',
-              labelIds: ['INBOX'],
-              payload: {
-                mimeType: 'multipart/mixed',
-                headers: [
-                  { name: 'From', value: 'recruiter@acme.com' },
-                  { name: 'To', value: 'user@example.com' },
-                  { name: 'Subject', value: 'Re: Offer details' },
-                ],
-                parts: [
-                  {
-                    mimeType: 'text/plain',
-                    filename: 'body.txt',
-                    body: { attachmentId: 'att-999', size: 25 },
-                  },
-                ],
+              {
+                id: 'msg-attachment-body',
+                threadId: 'thread-202',
+                internalDate: '1770000200000',
+                labelIds: ['INBOX'],
+                payload: {
+                  mimeType: 'multipart/mixed',
+                  headers: [
+                    { name: 'From', value: 'recruiter@acme.com' },
+                    { name: 'To', value: 'user@example.com' },
+                    { name: 'Subject', value: 'Re: Offer details' },
+                  ],
+                  parts: [
+                    {
+                      mimeType: 'text/plain',
+                      filename: 'body.txt',
+                      body: { attachmentId: 'att-999', size: 25 },
+                    },
+                  ],
+                },
               },
-            },
-          ],
-        });
-      }),
-      http.get('https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-attachment-body/attachments/att-999', () => {
-        return HttpResponse.json({
-          size: 25,
-          data: utf8Base64Url('Attachment plain content'),
-        });
-      }),
+            ],
+          });
+        },
+      ),
+      http.get(
+        'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg-attachment-body/attachments/att-999',
+        () => {
+          return HttpResponse.json({
+            size: 25,
+            data: utf8Base64Url('Attachment plain content'),
+          });
+        },
+      ),
     );
 
     const connector = client();
@@ -687,7 +721,10 @@ describe('Google Gmail and Calendar connector', () => {
         });
       }),
       http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-missing', () => {
-        return HttpResponse.json({ error: { code: 404, message: 'Thread not found' } }, { status: 404 });
+        return HttpResponse.json(
+          { error: { code: 404, message: 'Thread not found' } },
+          { status: 404 },
+        );
       }),
     );
 
@@ -718,9 +755,9 @@ describe('Google Gmail and Calendar connector', () => {
     const connector = client();
 
     // Input validation errors
-    await expect(
-      connector.listMailboxThreads({ accountEmail: 'invalid-email' }),
-    ).rejects.toThrow('Account email is invalid');
+    await expect(connector.listMailboxThreads({ accountEmail: 'invalid-email' })).rejects.toThrow(
+      'Account email is invalid',
+    );
 
     await expect(
       connector.listMailboxThreads({
@@ -812,10 +849,8 @@ describe('Google Gmail and Calendar connector', () => {
     expect(cumulResult.messages[8].truncationReason).toBe('Application body safety limit reached');
 
     // Abort during retry test
-    let retryCallCount = 0;
     server.use(
       http.get('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-retry-abort', () => {
-        retryCallCount += 1;
         return HttpResponse.error(); // Network error to force retry
       }),
     );

@@ -1800,7 +1800,15 @@ export class OutreachrRepository {
     const id = value.id ?? `contact:${randomUUID()}`;
     this.vault.run(
       'INSERT INTO contacts(id,company_id,name,title,primary_email,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
-      [id, value.companyId ?? null, value.name, value.title ?? null, value.primaryEmail ?? null, at, at],
+      [
+        id,
+        value.companyId ?? null,
+        value.name,
+        value.title ?? null,
+        value.primaryEmail ?? null,
+        at,
+        at,
+      ],
     );
     this.audit('contact.create', 'contact', id, { name: value.name }, at);
     return this.contact(id);
@@ -1814,7 +1822,14 @@ export class OutreachrRepository {
     }
     this.vault.run(
       'UPDATE contacts SET company_id=?,name=?,title=?,primary_email=?,updated_at=? WHERE id=?',
-      [value.companyId ?? null, value.name, value.title ?? null, value.primaryEmail ?? null, at, value.id],
+      [
+        value.companyId ?? null,
+        value.name,
+        value.title ?? null,
+        value.primaryEmail ?? null,
+        at,
+        value.id,
+      ],
     );
     this.audit('contact.update', 'contact', value.id, { name: value.name }, at);
     return this.contact(value.id);
@@ -1871,7 +1886,10 @@ export class OutreachrRepository {
     return this.applicationStage(id);
   }
 
-  updateApplicationStage(input: ApplicationStageInput & { id: string }, at: string): ApplicationStageRecord {
+  updateApplicationStage(
+    input: ApplicationStageInput & { id: string },
+    at: string,
+  ): ApplicationStageRecord {
     const value = ApplicationStageSchema.parse(input);
     if (!value.id) throw new Error('Application stage id is required');
     if (!this.vault.one('SELECT id FROM application_stages WHERE id=?', [value.id])) {
@@ -1879,13 +1897,25 @@ export class OutreachrRepository {
     }
     this.vault.run(
       'UPDATE application_stages SET name=?,position=?,terminal=?,archived=?,updated_at=? WHERE id=?',
-      [value.name, value.position, bool(value.terminal), bool(value.archived ?? false), at, value.id],
+      [
+        value.name,
+        value.position,
+        bool(value.terminal),
+        bool(value.archived ?? false),
+        at,
+        value.id,
+      ],
     );
     this.audit(
       'application_stage.update',
       'application_stage',
       value.id,
-      { name: value.name, position: value.position, terminal: value.terminal, archived: value.archived ?? false },
+      {
+        name: value.name,
+        position: value.position,
+        terminal: value.terminal,
+        archived: value.archived ?? false,
+      },
       at,
     );
     return this.applicationStage(value.id);
@@ -2122,7 +2152,14 @@ export class OutreachrRepository {
       ]);
       this.vault.run(
         'INSERT INTO application_stage_history(id,application_id,from_stage_id,to_stage_id,changed_at,note) VALUES (?,?,?,?,?,?)',
-        [`history:${randomUUID()}`, value.id, application.stage_id, value.toStageId, at, value.note ?? null],
+        [
+          `history:${randomUUID()}`,
+          value.id,
+          application.stage_id,
+          value.toStageId,
+          at,
+          value.note ?? null,
+        ],
       );
       this.audit(
         'application.transition',
@@ -2147,10 +2184,9 @@ export class OutreachrRepository {
     }
     this.vault.transaction(() => {
       if (value.primary) {
-        this.vault.run(
-          'UPDATE application_contacts SET primary_contact=0 WHERE application_id=?',
-          [value.applicationId],
-        );
+        this.vault.run('UPDATE application_contacts SET primary_contact=0 WHERE application_id=?', [
+          value.applicationId,
+        ]);
       }
       this.vault.run(
         `INSERT INTO application_contacts(application_id,contact_id,relationship,primary_contact) VALUES (?,?,?,?)
@@ -2173,10 +2209,10 @@ export class OutreachrRepository {
     if (!this.vault.one('SELECT id FROM job_applications WHERE id=?', [value.applicationId])) {
       throw new Error(`Job application ${value.applicationId} does not exist`);
     }
-    this.vault.run(
-      'DELETE FROM application_contacts WHERE application_id=? AND contact_id=?',
-      [value.applicationId, value.contactId],
-    );
+    this.vault.run('DELETE FROM application_contacts WHERE application_id=? AND contact_id=?', [
+      value.applicationId,
+      value.contactId,
+    ]);
     this.audit(
       'application.contact.unlink',
       'application',
@@ -2252,7 +2288,13 @@ export class OutreachrRepository {
       'INSERT INTO application_notes(id,application_id,body,created_at,updated_at) VALUES (?,?,?,?,?)',
       [id, value.applicationId, value.body, at, at],
     );
-    this.audit('application.note.create', 'application_note', id, { applicationId: value.applicationId }, at);
+    this.audit(
+      'application.note.create',
+      'application_note',
+      id,
+      { applicationId: value.applicationId },
+      at,
+    );
     return this.applicationNote(id);
   }
 
@@ -2289,9 +2331,24 @@ export class OutreachrRepository {
     const id = value.id ?? `task:${randomUUID()}`;
     this.vault.run(
       'INSERT INTO application_tasks(id,application_id,title,notes,due_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      [id, value.applicationId, value.title, value.notes ?? null, value.dueAt ?? null, value.status, at, at],
+      [
+        id,
+        value.applicationId,
+        value.title,
+        value.notes ?? null,
+        value.dueAt ?? null,
+        value.status,
+        at,
+        at,
+      ],
     );
-    this.audit('application.task.create', 'application_task', id, { applicationId: value.applicationId }, at);
+    this.audit(
+      'application.task.create',
+      'application_task',
+      id,
+      { applicationId: value.applicationId },
+      at,
+    );
     return this.applicationTask(id);
   }
 

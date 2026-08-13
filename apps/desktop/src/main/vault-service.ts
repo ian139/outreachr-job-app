@@ -414,10 +414,13 @@ interface MessageRow {
   sender_normalized: string;
   message_kind: DraftMessage['kind'];
   provider_thread_id: string | null;
+  reply_to_message_id: string | null;
   subject: string;
   body_text: string;
   attachments_json: string;
   state: string;
+  application_id: string | null;
+  application_contact_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1442,6 +1445,11 @@ export class VaultService {
         const person = message.recipient_person_id
           ? byId.get(message.recipient_person_id)
           : undefined;
+        const applicationContact = message.application_contact_id
+          ? this.#vault.one<{ name: string }>('SELECT name FROM contacts WHERE id=?', [
+              message.application_contact_id,
+            ])
+          : undefined;
         const ledger = this.#vault.one<Record<string, unknown>>(
           'SELECT * FROM send_ledger WHERE message_id=?',
           [message.id],
@@ -1468,8 +1476,9 @@ export class VaultService {
           id: message.id,
           provider,
           accountEmail: message.sender_address,
-          personId: message.recipient_person_id ?? '',
-          recipientName: person?.name ?? message.recipient_address,
+          applicationId: message.application_id ?? '',
+          contactId: message.application_contact_id ?? '',
+          recipientName: applicationContact?.name ?? person?.name ?? message.recipient_address,
           recipientEmail: message.recipient_address,
           subject: message.subject,
           bodyText: message.body_text,
@@ -1477,6 +1486,7 @@ export class VaultService {
             typeof ledger?.provider_thread_id === 'string'
               ? ledger.provider_thread_id
               : message.provider_thread_id,
+          replyToMessageId: message.reply_to_message_id,
           kind: message.message_kind,
           contentHash: approvalContentHash({
             recipientAddress: message.recipient_address,
@@ -1563,7 +1573,7 @@ export class VaultService {
           detail: draft.subject,
           dueAt: null,
           investorId: null,
-          personId: draft.personId,
+          personId: null,
           priority: 'normal',
           status: 'open',
         })),
@@ -2958,9 +2968,14 @@ export class VaultService {
         current.approvalBlockReasons[0] ?? 'This draft is not ready for founder approval',
       );
     }
-    const person = this.#allPeople().find((item) => item.id === current.personId);
-    if (current.kind === 'initial' && !person?.canSendInitial) {
-      throw new Error(person?.suppressionReason ?? 'Initial outreach is blocked for this person');
+    if (!current.applicationId && current.kind === 'initial') {
+      const row = this.#vault.one<MessageRow>('SELECT * FROM messages WHERE id=?', [id]);
+      const person = row?.recipient_person_id
+        ? this.#allPeople().find((item) => item.id === row.recipient_person_id)
+        : undefined;
+      if (!person?.canSendInitial) {
+        throw new Error(person?.suppressionReason ?? 'Initial outreach is blocked for this person');
+      }
     }
     this.#repository.approveMessage(id, this.#now().toISOString());
     await this.persist();
@@ -3031,9 +3046,7 @@ export class VaultService {
     return result;
   }
 
-  async createJobApplication(
-    input: CommandMap['application.create'],
-  ): Promise<ApplicationDetail> {
+  async createJobApplication(input: CommandMap['application.create']): Promise<ApplicationDetail> {
     const now = this.#now().toISOString();
     const detail = this.#repository.createJobApplication(input, now);
     await this.persist();
@@ -3050,9 +3063,7 @@ export class VaultService {
     return this.#repository.listJobApplications(input);
   }
 
-  async updateJobApplication(
-    input: CommandMap['application.update'],
-  ): Promise<ApplicationDetail> {
+  async updateJobApplication(input: CommandMap['application.update']): Promise<ApplicationDetail> {
     const now = this.#now().toISOString();
     const detail = this.#repository.updateJobApplication(input, now);
     await this.persist();

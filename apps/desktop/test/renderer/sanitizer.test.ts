@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { htmlToPlainText, sanitizeHtml, SANITIZER_ALLOWLIST } from '../../src/renderer/src/lib/sanitizer';
+import {
+  htmlToPlainText,
+  sanitizeHtml,
+  SANITIZER_ALLOWLIST,
+} from '../../src/renderer/src/lib/sanitizer';
 
 describe('sanitizer - DOMPurify allowlist helper', () => {
   it('allows semantic text, lists, quotes, tables, pre, code, and links', () => {

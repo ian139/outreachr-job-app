@@ -19,7 +19,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
 
     // Seed an application record first so detail views are active
     await navigate(page, 'Applications');
-    await page.getByRole('button', { name: 'New application', exact: true }).click();
+    await page.getByRole('button', { name: 'New application', exact: true }).first().click();
     await page.getByRole('button', { name: '+ New company' }).click();
     await page.getByLabel('Company name').fill('Responsive Corp');
     await page.getByLabel('Website').fill('https://responsive.test');
@@ -29,7 +29,10 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
     await page.getByLabel('Select company').selectOption({ label: 'Responsive Corp' });
     await page.getByLabel('Role title').fill('Lead Mobile Engineer');
     await page.getByLabel('Select stage').selectOption({ label: 'Applied' });
-    await page.getByRole('button', { name: 'New application', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: 'New application' })
+      .getByRole('button', { name: 'New application', exact: true })
+      .click();
     await expect(page.getByRole('heading', { name: 'Lead Mobile Engineer' })).toBeVisible();
 
     const viewports = [
@@ -42,6 +45,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
     for (const vp of viewports) {
       // Application detail view measurement & screenshot
       await navigate(page, 'Applications');
+      await page.getByRole('button', { name: 'View details' }).click();
       await expect(page.getByRole('heading', { name: 'Lead Mobile Engineer' })).toBeVisible();
       const appLayout = await captureResponsiveScreenshot(
         page,
@@ -54,7 +58,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
       // Inbox detail view measurement & screenshot
       await navigate(page, 'Inbox');
       await page.getByRole('button', { name: /Senior Software Engineer Interview/ }).click();
-      await expect(page.locator('.inbox-thread-detail')).toBeVisible();
+      await expect(page.getByRole('main', { name: 'Thread content' })).toBeVisible();
       const inboxLayout = await captureResponsiveScreenshot(
         page,
         testInfo,
@@ -73,6 +77,7 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
 
         // Mobile Applications -> Back to applications button
         await navigate(page, 'Applications');
+        await page.getByRole('button', { name: 'View details' }).click();
         const backToApplicationsButton = page.getByRole('button', { name: 'Back to applications' });
         await expect(backToApplicationsButton).toBeVisible();
         await backToApplicationsButton.click();
@@ -80,12 +85,16 @@ test.describe('Job Application Responsive Layout & Mobile Controls', () => {
 
         // Measure all visible interactive controls on mobile viewport
         const controls = await measureAllVisibleControls(page);
-        for (const control of controls) {
-          expect(
-            control.meetsTouchTarget,
-            `Interactive control "${control.name}" width (${control.width}px) and height (${control.height}px) must be >= 44px on mobile (${vp.width}x${vp.height})`,
-          ).toBe(true);
-        }
+        const undersizedControls = controls
+          .filter((control) => !control.meetsTouchTarget)
+          .map(
+            (control) =>
+              `${control.name || '(unnamed)'} (${control.width}px × ${control.height}px)`,
+          );
+        expect(
+          undersizedControls,
+          `All visible controls must be >= 44px on mobile (${vp.width}x${vp.height})`,
+        ).toEqual([]);
       }
     }
 

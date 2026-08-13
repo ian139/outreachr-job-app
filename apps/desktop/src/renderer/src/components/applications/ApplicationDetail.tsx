@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react';
-import type { ApplicationDetail as ApplicationDetailType, ApplicationTask, ConnectorProvider, DraftMessage } from '../../../../shared/contracts';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  ApplicationDetail as ApplicationDetailType,
+  ApplicationTask,
+  ConnectorProvider,
+  DraftMessage,
+} from '../../../../shared/contracts';
 import { Badge, Button, formatDate, Skeleton, TextField } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
 import { LinkContactModal } from './LinkContactModal';
@@ -51,10 +56,10 @@ export function ApplicationDetail({
   const [savingTask, setSavingTask] = useState(false);
   const [taskFilter, setTaskFilter] = useState<ApplicationTask['status'] | 'all'>('all');
 
-  const stages = data?.applicationStages ?? [];
+  const stages = useMemo(() => data?.applicationStages ?? [], [data?.applicationStages]);
   const stageMap = new Map(stages.map((s) => [s.id, s.name]));
 
-  const fetchDetail = async (): Promise<void> => {
+  const fetchDetail = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
@@ -71,14 +76,14 @@ export function ApplicationDetail({
     } finally {
       setLoading(false);
     }
-  };
+  }, [applicationId, command, stages]);
 
-  // Prevent refetch loop: depend ONLY on applicationId
+  // Prevent refetch loop: depend ONLY on applicationId and fetchDetail
   useEffect(() => {
     if (applicationId) {
-      fetchDetail();
+      void fetchDetail();
     }
-  }, [applicationId]);
+  }, [applicationId, fetchDetail]);
 
   // Stage Transition Handler
   const handleTransition = async (e: React.FormEvent): Promise<void> => {
@@ -97,7 +102,11 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Stage updated', detail: updated.stageName });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Transition failed', ...(err instanceof Error ? { detail: err.message } : {}) });
+      notify({
+        tone: 'error',
+        title: 'Transition failed',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     } finally {
       setTransitioning(false);
     }
@@ -118,7 +127,11 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Note added' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to add note', ...(err instanceof Error ? { detail: err.message } : {}) });
+      notify({
+        tone: 'error',
+        title: 'Failed to add note',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     } finally {
       setSavingNote(false);
     }
@@ -144,7 +157,11 @@ export function ApplicationDetail({
       notify({ tone: 'success', title: 'Task created' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to create task', ...(err instanceof Error ? { detail: err.message } : {}) });
+      notify({
+        tone: 'error',
+        title: 'Failed to create task',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     } finally {
       setSavingTask(false);
     }
@@ -160,7 +177,11 @@ export function ApplicationDetail({
       });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to update task status' });
+      notify({
+        tone: 'error',
+        title: 'Failed to update task status',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     }
   };
 
@@ -172,12 +193,20 @@ export function ApplicationDetail({
       notify({ tone: 'info', title: 'Contact unlinked' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to unlink contact' });
+      notify({
+        tone: 'error',
+        title: 'Failed to unlink contact',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     }
   };
 
   // Unlink Thread
-  const handleUnlinkThread = async (thread: { provider: ConnectorProvider; accountEmail: string; providerThreadId: string }): Promise<void> => {
+  const handleUnlinkThread = async (thread: {
+    provider: ConnectorProvider;
+    accountEmail: string;
+    providerThreadId: string;
+  }): Promise<void> => {
     try {
       const updated = await command('application.thread.unlink', {
         applicationId,
@@ -189,16 +218,26 @@ export function ApplicationDetail({
       notify({ tone: 'info', title: 'Thread unlinked' });
       await fetchDetail();
     } catch (err) {
-      notify({ tone: 'error', title: 'Failed to unlink thread' });
+      notify({
+        tone: 'error',
+        title: 'Failed to unlink thread',
+        ...(err instanceof Error ? { detail: err.message } : {}),
+      });
     }
   };
 
   if (loading) {
     return (
       <div className="application-detail-card">
-        <div style={{ height: '2rem', width: '60%' }}><Skeleton /></div>
-        <div style={{ height: '1.5rem', width: '40%' }}><Skeleton /></div>
-        <div style={{ height: '10rem', width: '100%' }}><Skeleton /></div>
+        <div style={{ height: '2rem', width: '60%' }}>
+          <Skeleton />
+        </div>
+        <div style={{ height: '1.5rem', width: '40%' }}>
+          <Skeleton />
+        </div>
+        <div style={{ height: '10rem', width: '100%' }}>
+          <Skeleton />
+        </div>
       </div>
     );
   }
@@ -211,7 +250,14 @@ export function ApplicationDetail({
             &larr; Back to applications
           </button>
         ) : null}
-        <div style={{ color: '#991b1b', padding: '1rem', backgroundColor: '#fef2f2', borderRadius: '0.5rem' }}>
+        <div
+          style={{
+            color: '#991b1b',
+            padding: '1rem',
+            backgroundColor: '#fef2f2',
+            borderRadius: '0.5rem',
+          }}
+        >
           {error ?? 'Application not found.'}
         </div>
       </div>
@@ -227,10 +273,8 @@ export function ApplicationDetail({
     return t.status === taskFilter;
   });
 
-  const appContactIds = new Set(app.contacts.map((contact) => contact.id));
   const relevantDrafts = (data?.drafts ?? []).filter(
-    (draft: DraftMessage) =>
-      draft.applicationId === app.id || appContactIds.has(draft.contactId),
+    (draft: DraftMessage) => draft.applicationId === app.id,
   );
 
   return (
@@ -253,7 +297,14 @@ export function ApplicationDetail({
             <h2>{app.role}</h2>
             <p>{app.companyName}</p>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.375rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: '0.375rem',
+            }}
+          >
             <span className="stage-badge stage-badge--active">{app.stageName}</span>
             {availableStages.length > 0 ? (
               <Button
@@ -271,7 +322,9 @@ export function ApplicationDetail({
         {/* Change Stage Form */}
         {showTransition && availableStages.length > 0 ? (
           <form
-            onSubmit={handleTransition}
+            onSubmit={(e) => {
+              void handleTransition(e);
+            }}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -303,10 +356,22 @@ export function ApplicationDetail({
               onChange={(e) => setTransitionNote(e.target.value)}
             />
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <Button type="button" tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowTransition(false)}>
+              <Button
+                type="button"
+                tone="quiet"
+                size="small"
+                style={{ minHeight: '44px' }}
+                onClick={() => setShowTransition(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" tone="primary" size="small" style={{ minHeight: '44px' }} loading={transitioning}>
+              <Button
+                type="submit"
+                tone="primary"
+                size="small"
+                style={{ minHeight: '44px' }}
+                loading={transitioning}
+              >
                 Confirm stage change
               </Button>
             </div>
@@ -319,9 +384,23 @@ export function ApplicationDetail({
         <div className="detail-section__header">
           <span className="detail-section__title">Company Info</span>
         </div>
-        <div style={{ fontSize: '0.875rem', color: '#334155', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div><strong>Name:</strong> {app.company?.name ?? app.companyName}</div>
-          {app.company?.location ? <div><strong>Location:</strong> {app.company.location}</div> : null}
+        <div
+          style={{
+            fontSize: '0.875rem',
+            color: '#334155',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+          }}
+        >
+          <div>
+            <strong>Name:</strong> {app.company?.name ?? app.companyName}
+          </div>
+          {app.company?.location ? (
+            <div>
+              <strong>Location:</strong> {app.company.location}
+            </div>
+          ) : null}
           {app.company?.website ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <strong>Website:</strong>
@@ -331,7 +410,7 @@ export function ApplicationDetail({
                 style={{ minHeight: '44px' }}
                 onClick={() => {
                   if (window.outreachr?.openExternal && app.company?.website) {
-                    window.outreachr.openExternal(app.company.website);
+                    void window.outreachr.openExternal(app.company.website);
                   }
                 }}
               >
@@ -348,19 +427,27 @@ export function ApplicationDetail({
           <span className="detail-section__title">Stage History</span>
         </div>
         {app.stageHistory.length === 0 ? (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No transition history recorded.</p>
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+            No transition history recorded.
+          </p>
         ) : (
           <ul className="timeline-list">
             {app.stageHistory.map((item) => {
-              const fromName = item.fromStageId ? (stageMap.get(item.fromStageId) ?? 'Initial') : 'Created';
+              const fromName = item.fromStageId
+                ? (stageMap.get(item.fromStageId) ?? 'Initial')
+                : 'Created';
               const toName = stageMap.get(item.toStageId) ?? item.toStageId;
               return (
                 <li key={item.id} className="timeline-item">
                   <div className="timeline-item__meta">
-                    <span className="timeline-item__change">{fromName} &rarr; {toName}</span>
+                    <span className="timeline-item__change">
+                      {fromName} &rarr; {toName}
+                    </span>
                     <span>{formatDate(item.changedAt, true)}</span>
                   </div>
-                  {item.note ? <div className="timeline-item__note">&ldquo;{item.note}&rdquo;</div> : null}
+                  {item.note ? (
+                    <div className="timeline-item__note">&ldquo;{item.note}&rdquo;</div>
+                  ) : null}
                 </li>
               );
             })}
@@ -372,12 +459,19 @@ export function ApplicationDetail({
       <div className="detail-section">
         <div className="detail-section__header">
           <span className="detail-section__title">Linked Contacts</span>
-          <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowLinkContact(true)}>
+          <Button
+            tone="quiet"
+            size="small"
+            style={{ minHeight: '44px' }}
+            onClick={() => setShowLinkContact(true)}
+          >
             + Link contact
           </Button>
         </div>
         {app.contacts.length === 0 ? (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No contacts linked to this application.</p>
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+            No contacts linked to this application.
+          </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {app.contacts.map((contact) => (
@@ -388,10 +482,21 @@ export function ApplicationDetail({
                     {contact.primary ? <span className="badge-primary">PRIMARY</span> : null}
                     <Badge tone="neutral">{contact.relationship}</Badge>
                   </div>
-                  {contact.title ? <span className="contact-card__title">{contact.title}</span> : null}
-                  {contact.primaryEmail ? <span className="contact-card__email">{contact.primaryEmail}</span> : null}
+                  {contact.title ? (
+                    <span className="contact-card__title">{contact.title}</span>
+                  ) : null}
+                  {contact.primaryEmail ? (
+                    <span className="contact-card__email">{contact.primaryEmail}</span>
+                  ) : null}
                 </div>
-                <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => handleUnlinkContact(contact.id)}>
+                <Button
+                  tone="quiet"
+                  size="small"
+                  style={{ minHeight: '44px' }}
+                  onClick={() => {
+                    void handleUnlinkContact(contact.id);
+                  }}
+                >
                   Unlink
                 </Button>
               </div>
@@ -404,18 +509,35 @@ export function ApplicationDetail({
       <div className="detail-section">
         <div className="detail-section__header">
           <span className="detail-section__title">Linked Email Threads</span>
-          <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowLinkThread(true)}>
+          <Button
+            tone="quiet"
+            size="small"
+            style={{ minHeight: '44px' }}
+            onClick={() => setShowLinkThread(true)}
+          >
             + Link thread
           </Button>
         </div>
         {app.threads.length === 0 ? (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No mail threads linked to this application.</p>
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+            No mail threads linked to this application.
+          </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {app.threads.map((thread) => (
               <div key={thread.providerThreadId} className="thread-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <div className="thread-card__subject">{thread.subjectSnapshot || 'Untitled thread'}</div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <div className="thread-card__subject">
+                    {thread.subjectSnapshot || 'Untitled thread'}
+                  </div>
                   <div style={{ display: 'flex', gap: '0.375rem' }}>
                     {onNavigateThread ? (
                       <Button
@@ -434,13 +556,22 @@ export function ApplicationDetail({
                         View related thread
                       </Button>
                     ) : null}
-                    <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => handleUnlinkThread(thread)}>
+                    <Button
+                      tone="quiet"
+                      size="small"
+                      style={{ minHeight: '44px' }}
+                      onClick={() => {
+                        void handleUnlinkThread(thread);
+                      }}
+                    >
                       Unlink
                     </Button>
                   </div>
                 </div>
                 <div className="thread-card__meta">
-                  <span>{thread.provider.toUpperCase()} &bull; {thread.accountEmail}</span>
+                  <span>
+                    {thread.provider.toUpperCase()} &bull; {thread.accountEmail}
+                  </span>
                   <span>Linked: {formatDate(thread.linkedAt)}</span>
                 </div>
               </div>
@@ -453,13 +584,23 @@ export function ApplicationDetail({
       <div className="detail-section">
         <div className="detail-section__header">
           <span className="detail-section__title">Application Notes</span>
-          <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowAddNote(!showAddNote)}>
+          <Button
+            tone="quiet"
+            size="small"
+            style={{ minHeight: '44px' }}
+            onClick={() => setShowAddNote(!showAddNote)}
+          >
             + Add note
           </Button>
         </div>
 
         {showAddNote ? (
-          <form onSubmit={handleAddNote} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <form
+            onSubmit={(e) => {
+              void handleAddNote(e);
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+          >
             <textarea
               aria-label="Note body"
               required
@@ -476,10 +617,22 @@ export function ApplicationDetail({
               placeholder="Enter note details..."
             />
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <Button type="button" tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowAddNote(false)}>
+              <Button
+                type="button"
+                tone="quiet"
+                size="small"
+                style={{ minHeight: '44px' }}
+                onClick={() => setShowAddNote(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" tone="primary" size="small" style={{ minHeight: '44px' }} loading={savingNote}>
+              <Button
+                type="submit"
+                tone="primary"
+                size="small"
+                style={{ minHeight: '44px' }}
+                loading={savingNote}
+              >
                 Add note
               </Button>
             </div>
@@ -491,8 +644,18 @@ export function ApplicationDetail({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {app.notes.map((note) => (
-              <div key={note.id} style={{ backgroundColor: '#ffffff', padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.875rem', color: '#1e293b', whiteSpace: 'pre-wrap' }}>{note.body}</div>
+              <div
+                key={note.id}
+                style={{
+                  backgroundColor: '#ffffff',
+                  padding: '0.75rem',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                <div style={{ fontSize: '0.875rem', color: '#1e293b', whiteSpace: 'pre-wrap' }}>
+                  {note.body}
+                </div>
                 <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.375rem' }}>
                   {formatDate(note.createdAt, true)}
                 </div>
@@ -506,7 +669,12 @@ export function ApplicationDetail({
       <div className="detail-section">
         <div className="detail-section__header">
           <span className="detail-section__title">Tasks</span>
-          <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowAddTask(!showAddTask)}>
+          <Button
+            tone="quiet"
+            size="small"
+            style={{ minHeight: '44px' }}
+            onClick={() => setShowAddTask(!showAddTask)}
+          >
             + Add task
           </Button>
         </div>
@@ -527,7 +695,12 @@ export function ApplicationDetail({
         </div>
 
         {showAddTask ? (
-          <form onSubmit={handleAddTask} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <form
+            onSubmit={(e) => {
+              void handleAddTask(e);
+            }}
+            style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
+          >
             <TextField
               label="Task title"
               required
@@ -548,10 +721,22 @@ export function ApplicationDetail({
               onChange={(e) => setTaskDueAt(e.target.value)}
             />
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-              <Button type="button" tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowAddTask(false)}>
+              <Button
+                type="button"
+                tone="quiet"
+                size="small"
+                style={{ minHeight: '44px' }}
+                onClick={() => setShowAddTask(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" tone="primary" size="small" style={{ minHeight: '44px' }} loading={savingTask}>
+              <Button
+                type="submit"
+                tone="primary"
+                size="small"
+                style={{ minHeight: '44px' }}
+                loading={savingTask}
+              >
                 Add task
               </Button>
             </div>
@@ -559,7 +744,9 @@ export function ApplicationDetail({
         ) : null}
 
         {filteredTasks.length === 0 ? (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No tasks matching filter.</p>
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+            No tasks matching filter.
+          </p>
         ) : (
           <div className="task-list">
             {filteredTasks.map((task) => (
@@ -570,15 +757,21 @@ export function ApplicationDetail({
                     className="task-row__checkbox"
                     checked={task.status === 'done'}
                     aria-label={`Mark ${task.title} as ${task.status === 'done' ? 'open' : 'done'}`}
-                    onChange={() => handleToggleTaskStatus(task)}
+                    onChange={() => {
+                      void handleToggleTaskStatus(task);
+                    }}
                   />
                   <div>
                     <div className="task-row__title">{task.title}</div>
-                    {task.notes ? <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{task.notes}</div> : null}
+                    {task.notes ? (
+                      <div style={{ fontSize: '0.75rem', color: '#64748b' }}>{task.notes}</div>
+                    ) : null}
                   </div>
                 </div>
                 {task.dueAt ? (
-                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Due: {formatDate(task.dueAt)}</span>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                    Due: {formatDate(task.dueAt)}
+                  </span>
                 ) : null}
               </div>
             ))}
@@ -590,25 +783,41 @@ export function ApplicationDetail({
       <div className="detail-section">
         <div className="detail-section__header">
           <span className="detail-section__title">Drafts &amp; Prepared Replies</span>
-          <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setShowPrepareDraft(true)}>
+          <Button
+            tone="quiet"
+            size="small"
+            style={{ minHeight: '44px' }}
+            onClick={() => setShowPrepareDraft(true)}
+          >
             Prepare reply
           </Button>
         </div>
 
         {relevantDrafts.length === 0 ? (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No drafts prepared for this application.</p>
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>
+            No drafts prepared for this application.
+          </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {relevantDrafts.map((d: DraftMessage) => (
               <div key={d.id} className="thread-card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
                   <span className="thread-card__subject">{d.subject}</span>
-                  <Button tone="quiet" size="small" style={{ minHeight: '44px' }} onClick={() => setActiveDraftReview(d)}>
+                  <Button
+                    tone="quiet"
+                    size="small"
+                    style={{ minHeight: '44px' }}
+                    onClick={() => setActiveDraftReview(d)}
+                  >
                     Review draft
                   </Button>
                 </div>
                 <div className="thread-card__meta">
-                  <span>State: {d.approvalState.toUpperCase()} &bull; Recipient: {d.recipientEmail}</span>
+                  <span>
+                    State: {d.approvalState.toUpperCase()} &bull; Recipient: {d.recipientEmail}
+                  </span>
                   <span>{d.provider.toUpperCase()}</span>
                 </div>
               </div>
@@ -623,14 +832,18 @@ export function ApplicationDetail({
         applicationId={app.id}
         companyId={app.companyId}
         onClose={() => setShowLinkContact(false)}
-        onLinked={() => fetchDetail()}
+        onLinked={() => {
+          void fetchDetail();
+        }}
       />
 
       <LinkThreadModal
         open={showLinkThread}
         applicationId={app.id}
         onClose={() => setShowLinkThread(false)}
-        onLinked={() => fetchDetail()}
+        onLinked={() => {
+          void fetchDetail();
+        }}
       />
 
       <DraftPrepareModal
@@ -641,7 +854,9 @@ export function ApplicationDetail({
         contacts={app.contacts}
         threads={app.threads}
         onClose={() => setShowPrepareDraft(false)}
-        onCreated={() => fetchDetail()}
+        onCreated={() => {
+          void fetchDetail();
+        }}
       />
 
       <DraftReviewModal
