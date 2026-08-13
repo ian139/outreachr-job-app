@@ -20,29 +20,44 @@ import {
 export function parseSmokeArgs(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
 
-  let kind = args.kind;
+  const hasDmg = args.dmg !== undefined && args.dmg !== false;
+  const hasZip = args.zip !== undefined && args.zip !== false;
+
+  if (hasDmg && hasZip) {
+    throw new Error('Cannot specify both --dmg and --zip options.');
+  }
+
+  let kind = args.kind?.toLowerCase();
   let dmgPath;
   let zipPath;
 
   if (typeof args.dmg === 'string') {
     dmgPath = path.resolve(args.dmg);
-    if (!kind) kind = 'dmg';
+    if (kind && kind !== 'dmg') {
+      throw new Error(`Inconsistent --kind "${args.kind}" and --dmg option.`);
+    }
+    kind = 'dmg';
+  } else if (hasDmg) {
+    if (kind && kind !== 'dmg') {
+      throw new Error(`Inconsistent --kind "${args.kind}" and --dmg option.`);
+    }
+    kind = 'dmg';
   }
+
   if (typeof args.zip === 'string') {
     zipPath = path.resolve(args.zip);
-    if (!kind) kind = 'zip';
+    if (kind && kind !== 'zip') {
+      throw new Error(`Inconsistent --kind "${args.kind}" and --zip option.`);
+    }
+    kind = 'zip';
+  } else if (hasZip) {
+    if (kind && kind !== 'zip') {
+      throw new Error(`Inconsistent --kind "${args.kind}" and --zip option.`);
+    }
+    kind = 'zip';
   }
 
-  if (args.dmg === true && args.zip === true) {
-    throw new Error('Cannot specify both --dmg and --zip flags.');
-  }
-
-  if (!kind) {
-    if (args.dmg === true) kind = 'dmg';
-    else if (args.zip === true) kind = 'zip';
-  }
-
-  if (kind && !['dmg', 'zip', 'nsis', 'appimage', 'deb'].includes(kind.toLowerCase())) {
+  if (kind && !['dmg', 'zip', 'nsis', 'appimage', 'deb'].includes(kind)) {
     throw new Error(`Invalid distribution kind "${kind}". Expected "dmg" or "zip".`);
   }
   const arch = args.arch ?? args.architecture;
@@ -59,7 +74,7 @@ export function parseSmokeArgs(argv = process.argv.slice(2)) {
   return {
     releaseDir,
     timeoutMs,
-    kind: kind?.toLowerCase(),
+    kind,
     arch,
     dmgPath,
     zipPath,

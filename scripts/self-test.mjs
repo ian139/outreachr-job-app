@@ -759,6 +759,18 @@ try {
     /Cannot specify both --dmg and --zip/,
   );
   assert.throws(
+    () => parseSmokeArgs(['--dmg', path.join(temporaryRoot, 'a.dmg'), '--zip', path.join(temporaryRoot, 'b.zip')]),
+    /Cannot specify both --dmg and --zip/,
+  );
+  assert.throws(
+    () => parseSmokeArgs(['--kind', 'zip', '--dmg', path.join(temporaryRoot, 'a.dmg')]),
+    /Inconsistent --kind "zip" and --dmg option/,
+  );
+  assert.throws(
+    () => parseSmokeArgs(['--kind', 'dmg', '--zip', path.join(temporaryRoot, 'b.zip')]),
+    /Inconsistent --kind "dmg" and --zip option/,
+  );
+  assert.throws(
     () => parseSmokeArgs(['--arch', 'riscv64']),
     /Invalid architecture "riscv64"/,
   );
