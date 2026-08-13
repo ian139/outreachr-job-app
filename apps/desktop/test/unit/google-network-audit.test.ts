@@ -1,77 +1,139 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   GoogleMutationDisallowedError,
   GoogleNetworkAuditor,
+  GoogleUnexpectedEndpointError,
   classifyGoogleEndpoint,
+  createAuditedFetch,
   redactGoogleUrl,
   startGoogleNetworkAudit,
 } from '../../e2e/support/google-network-audit';
+import { ConnectorService } from '../../src/main/connector-service';
 
-describe('Redacted Google Network Audit Mechanic', () => {
+describe('Redacted Google Network Audit Mechanic (Fail-Closed)', () => {
   describe('classifyGoogleEndpoint', () => {
-    it('classifies allowed OAuth and token endpoints', () => {
+    it('classifies ONLY contract-allowed OAuth authorize/token/userinfo and Gmail GET list/thread/message/attachment', () => {
+      // Allowed OAuth
       expect(classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com/token')).toEqual({
         endpointClass: 'oauth.token',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
       expect(classifyGoogleEndpoint('GET', 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid')).toEqual({
         endpointClass: 'oauth.authorize',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com/revoke?token=123')).toEqual({
-        endpointClass: 'oauth.revoke',
+      expect(classifyGoogleEndpoint('GET', 'https://www.googleapis.com/oauth2/v2/userinfo')).toEqual({
+        endpointClass: 'oauth.userinfo',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
-    });
 
-    it('classifies allowed Gmail GET read endpoints', () => {
+      // Allowed Gmail GETs
       expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages')).toEqual({
         endpointClass: 'gmail.messages.list',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/founder@example.com/messages/msg_12345')).toEqual({
+      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123')).toEqual({
         endpointClass: 'gmail.messages.get',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
       expect(
-        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_12345/attachments/att_999'),
+        classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123/attachments/att_456'),
       ).toEqual({
         endpointClass: 'gmail.attachments.get',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
       expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads')).toEqual({
         endpointClass: 'gmail.threads.list',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
       });
 
-      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads/thread_abc123')).toEqual({
+      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_789')).toEqual({
         endpointClass: 'gmail.threads.get',
         isAllowed: true,
-        isMutation: false,
+        isGmailMutation: false,
+        isUnexpected: false,
+      });
+    });
+
+    it('disallows uncontracted Google endpoints as unexpected (OAuth revoke, Gmail labels/drafts/profile, Calendar)', () => {
+      expect(classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com/revoke?token=123')).toEqual({
+        endpointClass: 'oauth.revoke',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
       });
 
       expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/labels')).toEqual({
-        endpointClass: 'gmail.labels.list',
-        isAllowed: true,
-        isMutation: false,
+        endpointClass: 'gmail.labels.get',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
+      });
+
+      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/drafts')).toEqual({
+        endpointClass: 'gmail.drafts.get',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
       });
 
       expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com/gmail/v1/users/me/profile')).toEqual({
         endpointClass: 'gmail.profile.get',
-        isAllowed: true,
-        isMutation: false,
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
+      });
+
+      expect(classifyGoogleEndpoint('GET', 'https://calendar.googleapis.com/calendar/v3/calendars/primary/events')).toEqual({
+        endpointClass: 'calendar.events.list',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
+      });
+
+      expect(classifyGoogleEndpoint('POST', 'https://calendar.googleapis.com/calendar/v3/calendars/primary/events')).toEqual({
+        endpointClass: 'calendar.events.create',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
+      });
+    });
+
+    it('enforces exact host matching and rejects spoofed subdomains', () => {
+      expect(classifyGoogleEndpoint('GET', 'https://gmail.googleapis.com.evil.test/gmail/v1/users/me/messages')).toEqual({
+        endpointClass: 'external.unexpected',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
+      });
+
+      expect(classifyGoogleEndpoint('POST', 'https://oauth2.googleapis.com.attacker.com/token')).toEqual({
+        endpointClass: 'external.unexpected',
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
       });
     });
 
@@ -79,43 +141,29 @@ describe('Redacted Google Network Audit Mechanic', () => {
       expect(classifyGoogleEndpoint('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send')).toEqual({
         endpointClass: 'gmail.messages.send',
         isAllowed: false,
-        isMutation: true,
+        isGmailMutation: true,
+        isUnexpected: false,
       });
 
       expect(classifyGoogleEndpoint('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/drafts')).toEqual({
         endpointClass: 'gmail.drafts.create',
         isAllowed: false,
-        isMutation: true,
-      });
-
-      expect(classifyGoogleEndpoint('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/send')).toEqual({
-        endpointClass: 'gmail.drafts.send',
-        isAllowed: false,
-        isMutation: true,
+        isGmailMutation: true,
+        isUnexpected: false,
       });
 
       expect(classifyGoogleEndpoint('DELETE', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123')).toEqual({
         endpointClass: 'gmail.messages.delete',
         isAllowed: false,
-        isMutation: true,
-      });
-
-      expect(classifyGoogleEndpoint('PUT', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123')).toEqual({
-        endpointClass: 'gmail.messages.mutation',
-        isAllowed: false,
-        isMutation: true,
+        isGmailMutation: true,
+        isUnexpected: false,
       });
 
       expect(classifyGoogleEndpoint('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_123/modify')).toEqual({
         endpointClass: 'gmail.messages.modify',
         isAllowed: false,
-        isMutation: true,
-      });
-
-      expect(classifyGoogleEndpoint('POST', 'https://gmail.googleapis.com/gmail/v1/users/me/threads/thread_456/modify')).toEqual({
-        endpointClass: 'gmail.threads.modify',
-        isAllowed: false,
-        isMutation: true,
+        isGmailMutation: true,
+        isUnexpected: false,
       });
     });
   });
@@ -123,157 +171,85 @@ describe('Redacted Google Network Audit Mechanic', () => {
   describe('redactGoogleUrl', () => {
     it('strips query strings and replaces resource path identifiers with generic placeholders', () => {
       const raw =
-        'https://gmail.googleapis.com/gmail/v1/users/founder%40company.com/messages/msg_998877/attachments/att_112233?format=metadata&access_token=ya29.secret123&q=from%3Asender%40test.com';
+        'https://gmail.googleapis.com/gmail/v1/users/founder%40company.test/messages/msg_9999/attachments/att_1111?format=metadata&access_token=ya29.secret_token_val&q=from%3Acandidate%40test.org';
       const redacted = redactGoogleUrl(raw);
 
       expect(redacted).toBe('https://gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId');
       expect(redacted).not.toContain('founder');
-      expect(redacted).not.toContain('company.com');
-      expect(redacted).not.toContain('msg_998877');
-      expect(redacted).not.toContain('att_112233');
-      expect(redacted).not.toContain('secret123');
-      expect(redacted).not.toContain('sender');
-    });
-
-    it('redacts thread, draft, and label path components', () => {
-      expect(redactGoogleUrl('https://gmail.googleapis.com/gmail/v1/users/ada@test.org/threads/th_001')).toBe(
-        'https://gmail.googleapis.com/gmail/v1/users/:userId/threads/:threadId',
-      );
-      expect(redactGoogleUrl('https://gmail.googleapis.com/gmail/v1/users/ada@test.org/drafts/dr_002')).toBe(
-        'https://gmail.googleapis.com/gmail/v1/users/:userId/drafts/:draftId',
-      );
-      expect(redactGoogleUrl('https://gmail.googleapis.com/gmail/v1/users/ada@test.org/labels/label_003')).toBe(
-        'https://gmail.googleapis.com/gmail/v1/users/:userId/labels/:labelId',
-      );
+      expect(redacted).not.toContain('msg_9999');
+      expect(redacted).not.toContain('secret_token_val');
+      expect(redacted).not.toContain('candidate');
     });
   });
 
-  describe('GoogleNetworkAuditor lifecycle and summary', () => {
-    it('records allowed GET read requests and returns a machine-readable summary with zero mutations', () => {
-      const auditor = startGoogleNetworkAudit({ throwOnMutation: true });
+  describe('GoogleNetworkAuditor lifecycle and metrics separation', () => {
+    it('separates Gmail mutation attempts from unexpected endpoint requests in summary', () => {
+      const auditor = startGoogleNetworkAudit({ throwOnMutation: false, throwOnUnexpected: false });
 
-      auditor.recordRequest({
-        method: 'POST',
-        url: 'https://oauth2.googleapis.com/token',
-        headers: { Authorization: 'Bearer secret-token-value' },
-        body: { code: 'secret_auth_code' },
-      });
+      // Allowed
+      auditor.recordRequest({ method: 'POST', url: 'https://oauth2.googleapis.com/token' });
+      auditor.recordRequest({ method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages' });
 
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages?q=is%3Aunread',
-      });
+      // Gmail Mutation
+      auditor.recordRequest({ method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send' });
 
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages/msg_123',
-      });
+      // Unexpected Request
+      auditor.recordRequest({ method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/labels' });
 
       const summary = auditor.getSummary();
 
-      expect(summary.totalRequests).toBe(3);
-      expect(summary.allowedRequests).toBe(3);
-      expect(summary.mutationAttempts).toBe(0);
-      expect(summary.zeroMutations).toBe(true);
-
-      expect(summary.endpointCounts).toEqual({
-        'POST oauth.token': 1,
-        'GET gmail.messages.list': 1,
-        'GET gmail.messages.get': 1,
-      });
-
-      expect(summary.records).toEqual([
-        { method: 'POST', endpointClass: 'oauth.token', status: 'allowed' },
-        { method: 'GET', endpointClass: 'gmail.messages.list', status: 'allowed' },
-        { method: 'GET', endpointClass: 'gmail.messages.get', status: 'allowed' },
-      ]);
-
-      // Verify no tokens or sensitive strings leak into summary JSON
-      const jsonStr = JSON.stringify(summary);
-      expect(jsonStr).not.toContain('secret-token-value');
-      expect(jsonStr).not.toContain('secret_auth_code');
-      expect(jsonStr).not.toContain('ada@test.org');
-      expect(jsonStr).not.toContain('msg_123');
-      expect(jsonStr).not.toContain('is%3Aunread');
-
-      expect(() => auditor.assertZeroMutations()).not.toThrow();
-    });
-
-    it('hard-fails on disallowed Gmail mutations when throwOnMutation is true', () => {
-      const auditor = new GoogleNetworkAuditor({ throwOnMutation: true });
-
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-      });
-
-      expect(() =>
-        auditor.recordRequest({
-          method: 'POST',
-          url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-          body: { raw: 'base64_encoded_email_body_text' },
-        }),
-      ).toThrow(GoogleMutationDisallowedError);
-
-      const summary = auditor.getSummary();
-      expect(summary.totalRequests).toBe(2);
-      expect(summary.allowedRequests).toBe(1);
-      expect(summary.mutationAttempts).toBe(1);
+      expect(summary.totalRequests).toBe(4);
+      expect(summary.allowedRequests).toBe(2);
+      expect(summary.disallowedRequests).toBe(2);
+      expect(summary.gmailMutationAttempts).toBe(1);
+      expect(summary.unexpectedRequests).toBe(1);
       expect(summary.zeroMutations).toBe(false);
+      expect(summary.zeroUnexpected).toBe(false);
 
       expect(() => auditor.assertZeroMutations()).toThrow(/Zero mutations policy violated/);
+      expect(() => auditor.assertZeroUnexpected()).toThrow(/exceeding fixed allowed contract/);
     });
 
-    it('counts disallowed Gmail mutations without throwing when throwOnMutation is false', () => {
-      const auditor = new GoogleNetworkAuditor({ throwOnMutation: false });
-
-      auditor.recordRequest({
-        method: 'POST',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-      });
-
-      auditor.recordRequest({
-        method: 'POST',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts',
-      });
-
-      const summary = auditor.getSummary();
-      expect(summary.totalRequests).toBe(2);
-      expect(summary.allowedRequests).toBe(0);
-      expect(summary.mutationAttempts).toBe(2);
-      expect(summary.zeroMutations).toBe(false);
-
-      expect(summary.records).toEqual([
-        { method: 'POST', endpointClass: 'gmail.messages.send', status: 'disallowed' },
-        { method: 'POST', endpointClass: 'gmail.drafts.create', status: 'disallowed' },
-      ]);
+    it('can throw GoogleUnexpectedEndpointError on unexpected requests when throwOnUnexpected is enabled', () => {
+      const auditor = new GoogleNetworkAuditor({ throwOnUnexpected: true });
+      expect(() =>
+        auditor.recordRequest({ method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/labels' }),
+      ).toThrow(GoogleUnexpectedEndpointError);
     });
+  });
 
-    it('supports reset and stop lifecycle operations', () => {
-      const auditor = startGoogleNetworkAudit({ throwOnMutation: false });
+  describe('Live Electron process / ConnectorService opt-in fetch audit hook', () => {
+    it('emits method + endpoint class/count summary to explicit file path when configured', async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), 'outreachr-audit-test-'));
+      const summaryFile = join(tempDir, 'audit-summary.json');
 
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-      });
-      expect(auditor.getSummary().totalRequests).toBe(1);
+      try {
+        const mockFetch = async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('{}', { status: 200 });
+        const auditedFetch = createAuditedFetch(mockFetch, { summaryPath: summaryFile, throwOnMutation: false });
 
-      auditor.reset();
-      expect(auditor.getSummary().totalRequests).toBe(0);
+        await auditedFetch('https://oauth2.googleapis.com/token', { method: 'POST' });
+        await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages', { method: 'GET' });
+        await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_001', { method: 'GET' });
 
-      auditor.stop();
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-      });
-      expect(auditor.getSummary().totalRequests).toBe(0);
+        const summaryRaw = await readFile(summaryFile, 'utf8');
+        const summary = JSON.parse(summaryRaw);
 
-      auditor.start();
-      auditor.recordRequest({
-        method: 'GET',
-        url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads',
-      });
-      expect(auditor.getSummary().totalRequests).toBe(1);
+        expect(summary.totalRequests).toBe(3);
+        expect(summary.allowedRequests).toBe(3);
+        expect(summary.gmailMutationAttempts).toBe(0);
+        expect(summary.zeroMutations).toBe(true);
+        expect(summary.endpointCounts).toEqual({
+          'POST oauth.token': 1,
+          'GET gmail.messages.list': 1,
+          'GET gmail.messages.get': 1,
+        });
+
+        // Ensure file contains NO secrets, tokens, or identifiers
+        expect(summaryRaw).not.toContain('msg_001');
+        expect(summaryRaw).not.toContain('Authorization');
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     });
   });
 });

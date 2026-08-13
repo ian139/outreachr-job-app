@@ -1,14 +1,16 @@
+import { fsyncSync, openSync, writeFileSync } from 'node:fs';
+
 /**
  * Redacted Google Live-Smoke & Network Audit Mechanic
  *
- * Provides a main-owned acceptance mechanic that:
- * 1. Allows OAuth/token endpoints and Gmail GET list/thread/message/attachment read endpoints.
- * 2. Records only the HTTP method, canonical endpoint class, and status/count.
- * 3. Hard-fails and counts any Gmail POST/PUT/PATCH/DELETE mutation attempt.
- * 4. Never persists or logs tokens, URLs containing identifiers (message IDs, thread IDs, user IDs),
+ * Enforces a fail-closed read-only acceptance policy for Google network traffic:
+ * 1. Allowed contract: ONLY OAuth authorize/token/userinfo plus Gmail GET list/thread/message/attachment.
+ * 2. Records ONLY HTTP method, canonical endpoint class, and allowed/disallowed status and counts.
+ * 3. Exact host matching: rejects non-explicit Google domains or spoofed subdomains.
+ * 4. Categorizes disallowed traffic into Gmail mutation attempts (POST/PUT/PATCH/DELETE) and unexpected requests.
+ * 5. Never persists or logs tokens, URLs containing identifiers (message IDs, thread IDs, user IDs),
  *    query parameters, email addresses, subjects, correspondents, or request/response bodies.
- * 5. Exposes a clear lifecycle: start audit, consume redacted machine-readable summary,
- *    and assert zero mutations.
+ * 6. Exposes lifecycle methods and file-persisted fetch wrapping for live Electron smoke auditing.
  */
 
 export class GoogleMutationDisallowedError extends Error {
@@ -25,6 +27,20 @@ export class GoogleMutationDisallowedError extends Error {
   }
 }
 
+export class GoogleUnexpectedEndpointError extends Error {
+  readonly method: string;
+  readonly endpointClass: string;
+  readonly redactedUrl: string;
+
+  constructor(method: string, endpointClass: string, redactedUrl: string) {
+    super(`Disallowed unexpected endpoint request intercepted: ${method} ${endpointClass} (${redactedUrl})`);
+    this.name = 'GoogleUnexpectedEndpointError';
+    this.method = method;
+    this.endpointClass = endpointClass;
+    this.redactedUrl = redactedUrl;
+  }
+}
+
 export interface AuditRequestInput {
   method: string;
   url: string | URL;
@@ -35,7 +51,8 @@ export interface AuditRequestInput {
 export interface EndpointClassification {
   endpointClass: string;
   isAllowed: boolean;
-  isMutation: boolean;
+  isGmailMutation: boolean;
+  isUnexpected: boolean;
 }
 
 export interface AuditRecordResult extends EndpointClassification {
@@ -53,8 +70,11 @@ export interface GoogleAuditRecordSummary {
 export interface GoogleAuditSummary {
   totalRequests: number;
   allowedRequests: number;
-  mutationAttempts: number;
+  disallowedRequests: number;
+  gmailMutationAttempts: number;
+  unexpectedRequests: number;
   zeroMutations: boolean;
+  zeroUnexpected: boolean;
   endpointCounts: Record<string, number>;
   records: GoogleAuditRecordSummary[];
 }
@@ -62,11 +82,32 @@ export interface GoogleAuditSummary {
 export interface GoogleNetworkAuditOptions {
   /** Hard-fail immediately when a Gmail mutation request (POST/PUT/PATCH/DELETE) is intercepted. Default: true */
   throwOnMutation?: boolean;
+  /** Hard-fail immediately when an unexpected request (exceeding fixed contract) is intercepted. Default: false */
+  throwOnUnexpected?: boolean;
+  /** File path to write machine-readable redacted summary JSON on every audited request */
+  summaryPath?: string;
+}
+
+const ALLOWED_EXACT_HOSTS = new Set([
+  'oauth2.googleapis.com',
+  'accounts.google.com',
+  'www.googleapis.com',
+  'openidconnect.googleapis.com',
+  'gmail.googleapis.com',
+  'calendar.googleapis.com',
+]);
+
+function isAllowedHost(hostname: string): boolean {
+  if (ALLOWED_EXACT_HOSTS.has(hostname)) return true;
+  if (hostname === '127.0.0.1' || hostname === 'localhost') return true;
+  return false;
 }
 
 /**
- * Classifies an HTTP method + Google endpoint URL into a canonical endpoint class,
- * determining whether it is an allowed read/token operation or a disallowed mutation.
+ * Classifies an HTTP method + Google endpoint URL into a canonical endpoint class.
+ * Enforces a strict, fail-closed contract allowing ONLY:
+ * - OAuth token, authorize, userinfo
+ * - Gmail GET list/thread/message/attachment
  */
 export function classifyGoogleEndpoint(methodInput: string, rawUrlInput: string | URL): EndpointClassification {
   const method = (methodInput || 'GET').toUpperCase();
@@ -82,152 +123,118 @@ export function classifyGoogleEndpoint(methodInput: string, rawUrlInput: string 
     pathname = rawUrl.split('?')[0] || '';
   }
 
-  // 1. OAuth / Token Endpoints
-  const isOAuthDomain =
-    hostname.includes('oauth2.googleapis.com') ||
-    hostname.includes('accounts.google.com') ||
-    hostname.includes('openidconnect.googleapis.com');
+  // Exact host check: fail-closed if host is unapproved
+  if (hostname && !isAllowedHost(hostname)) {
+    return {
+      endpointClass: 'external.unexpected',
+      isAllowed: false,
+      isGmailMutation: false,
+      isUnexpected: true,
+    };
+  }
 
-  if (isOAuthDomain || pathname.endsWith('/token') || pathname.endsWith('/oauth2/v2/auth') || pathname.endsWith('/revoke')) {
-    if (pathname.includes('/token')) {
-      return { endpointClass: 'oauth.token', isAllowed: true, isMutation: false };
+  // 1. OAuth Endpoints (Contract: token, authorize, userinfo ONLY)
+  if (
+    hostname === 'oauth2.googleapis.com' ||
+    hostname === 'accounts.google.com' ||
+    hostname === 'openidconnect.googleapis.com' ||
+    pathname.endsWith('/token') ||
+    pathname.endsWith('/oauth2/v2/auth') ||
+    pathname.includes('/userinfo')
+  ) {
+    if (pathname.endsWith('/token') || pathname.includes('/oauth2/v4/token')) {
+      return { endpointClass: 'oauth.token', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
-    if (pathname.includes('/auth')) {
-      return { endpointClass: 'oauth.authorize', isAllowed: true, isMutation: false };
+    if (pathname.includes('/auth') && method === 'GET') {
+      return { endpointClass: 'oauth.authorize', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+    }
+    if (pathname.includes('/userinfo') && method === 'GET') {
+      return { endpointClass: 'oauth.userinfo', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
     if (pathname.includes('/revoke')) {
-      return { endpointClass: 'oauth.revoke', isAllowed: true, isMutation: false };
+      return { endpointClass: 'oauth.revoke', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-    if (pathname.includes('/userinfo')) {
-      return { endpointClass: 'oauth.userinfo', isAllowed: true, isMutation: false };
-    }
-    return { endpointClass: 'oauth.other', isAllowed: true, isMutation: false };
+    return { endpointClass: 'oauth.unexpected', isAllowed: false, isGmailMutation: false, isUnexpected: true };
   }
 
   // 2. Gmail Endpoints
-  const isGmail = hostname.includes('gmail.googleapis.com') || pathname.includes('/gmail/v1/users/') || pathname.includes('/users/');
+  const isGmailPath = hostname === 'gmail.googleapis.com' || pathname.includes('/gmail/v1/users/') || pathname.includes('/users/');
 
-  if (isGmail) {
-    // Gmail Messages
-    if (/\/users\/[^/]+\/messages\/send$/i.test(pathname)) {
-      return { endpointClass: 'gmail.messages.send', isAllowed: false, isMutation: true };
-    }
-    if (/\/users\/[^/]+\/messages\/batchDelete$/i.test(pathname)) {
-      return { endpointClass: 'gmail.messages.batchDelete', isAllowed: false, isMutation: true };
-    }
-    if (/\/users\/[^/]+\/messages\/[^/]+\/modify$/i.test(pathname)) {
-      return { endpointClass: 'gmail.messages.modify', isAllowed: false, isMutation: true };
-    }
-    if (/\/users\/[^/]+\/messages\/[^/]+\/attachments\/[^/]+$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.attachments.get', isAllowed: true, isMutation: false };
+  if (isGmailPath) {
+    // Disallowed Mutations (POST/PUT/PATCH/DELETE)
+    if (method !== 'GET') {
+      if (/\/users\/[^/]+\/messages\/send$/i.test(pathname)) {
+        return { endpointClass: 'gmail.messages.send', isAllowed: false, isGmailMutation: true, isUnexpected: false };
       }
-      return { endpointClass: 'gmail.attachments.mutation', isAllowed: false, isMutation: true };
+      if (/\/users\/[^/]+\/messages\/batchDelete$/i.test(pathname)) {
+        return { endpointClass: 'gmail.messages.batchDelete', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      if (/\/users\/[^/]+\/messages\/[^/]+\/modify$/i.test(pathname)) {
+        return { endpointClass: 'gmail.messages.modify', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      if (/\/users\/[^/]+\/threads\/[^/]+\/modify$/i.test(pathname)) {
+        return { endpointClass: 'gmail.threads.modify', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      if (/\/users\/[^/]+\/drafts\/send$/i.test(pathname) || /\/users\/[^/]+\/drafts\/[^/]+\/send$/i.test(pathname)) {
+        return { endpointClass: 'gmail.drafts.send', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      if (/\/users\/[^/]+\/drafts/i.test(pathname)) {
+        return { endpointClass: 'gmail.drafts.create', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      if (/\/users\/[^/]+\/messages\/[^/]+$/i.test(pathname) && method === 'DELETE') {
+        return { endpointClass: 'gmail.messages.delete', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+      }
+      return { endpointClass: 'gmail.mutation.other', isAllowed: false, isGmailMutation: true, isUnexpected: false };
+    }
+
+    // Gmail GET Operations (Allowed: list, get, attachment, threads.list, threads.get ONLY)
+    if (/\/users\/[^/]+\/messages\/[^/]+\/attachments\/[^/]+$/i.test(pathname)) {
+      return { endpointClass: 'gmail.attachments.get', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
     if (/\/users\/[^/]+\/messages\/[^/]+$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.messages.get', isAllowed: true, isMutation: false };
-      }
-      if (method === 'DELETE') {
-        return { endpointClass: 'gmail.messages.delete', isAllowed: false, isMutation: true };
-      }
-      return { endpointClass: 'gmail.messages.mutation', isAllowed: false, isMutation: true };
+      return { endpointClass: 'gmail.messages.get', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
     if (/\/users\/[^/]+\/messages$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.messages.list', isAllowed: true, isMutation: false };
-      }
-      if (method === 'POST') {
-        return { endpointClass: 'gmail.messages.insert', isAllowed: false, isMutation: true };
-      }
-      return { endpointClass: 'gmail.messages.mutation', isAllowed: false, isMutation: true };
-    }
-
-    // Gmail Threads
-    if (/\/users\/[^/]+\/threads\/[^/]+\/modify$/i.test(pathname)) {
-      return { endpointClass: 'gmail.threads.modify', isAllowed: false, isMutation: true };
+      return { endpointClass: 'gmail.messages.list', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
     if (/\/users\/[^/]+\/threads\/[^/]+$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.threads.get', isAllowed: true, isMutation: false };
-      }
-      if (method === 'DELETE') {
-        return { endpointClass: 'gmail.threads.delete', isAllowed: false, isMutation: true };
-      }
-      return { endpointClass: 'gmail.threads.mutation', isAllowed: false, isMutation: true };
+      return { endpointClass: 'gmail.threads.get', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
     if (/\/users\/[^/]+\/threads$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.threads.list', isAllowed: true, isMutation: false };
-      }
-      return { endpointClass: 'gmail.threads.mutation', isAllowed: false, isMutation: true };
+      return { endpointClass: 'gmail.threads.list', isAllowed: true, isGmailMutation: false, isUnexpected: false };
     }
 
-    // Gmail Drafts
-    if (/\/users\/[^/]+\/drafts\/send$/i.test(pathname) || /\/users\/[^/]+\/drafts\/[^/]+\/send$/i.test(pathname)) {
-      return { endpointClass: 'gmail.drafts.send', isAllowed: false, isMutation: true };
+    // Uncontracted Gmail GETs (labels, drafts, profile, unknown GETs) -> Disallowed unexpected
+    if (/\/users\/[^/]+\/labels/i.test(pathname)) {
+      return { endpointClass: 'gmail.labels.get', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-    if (/\/users\/[^/]+\/drafts\/[^/]+$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.drafts.get', isAllowed: true, isMutation: false };
-      }
-      return { endpointClass: 'gmail.drafts.mutation', isAllowed: false, isMutation: true };
+    if (/\/users\/[^/]+\/drafts/i.test(pathname)) {
+      return { endpointClass: 'gmail.drafts.get', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-    if (/\/users\/[^/]+\/drafts$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.drafts.list', isAllowed: true, isMutation: false };
-      }
-      if (method === 'POST') {
-        return { endpointClass: 'gmail.drafts.create', isAllowed: false, isMutation: true };
-      }
-      return { endpointClass: 'gmail.drafts.mutation', isAllowed: false, isMutation: true };
+    if (/\/users\/[^/]+\/profile/i.test(pathname)) {
+      return { endpointClass: 'gmail.profile.get', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-
-    // Gmail Labels
-    if (/\/users\/[^/]+\/labels\/[^/]+$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.labels.get', isAllowed: true, isMutation: false };
-      }
-      return { endpointClass: 'gmail.labels.mutation', isAllowed: false, isMutation: true };
-    }
-    if (/\/users\/[^/]+\/labels$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.labels.list', isAllowed: true, isMutation: false };
-      }
-      return { endpointClass: 'gmail.labels.mutation', isAllowed: false, isMutation: true };
-    }
-
-    // Gmail Profile
-    if (/\/users\/[^/]+\/profile$/i.test(pathname)) {
-      if (method === 'GET') {
-        return { endpointClass: 'gmail.profile.get', isAllowed: true, isMutation: false };
-      }
-      return { endpointClass: 'gmail.profile.mutation', isAllowed: false, isMutation: true };
-    }
-
-    // Any other Gmail endpoint
-    if (method === 'GET') {
-      return { endpointClass: 'gmail.read.other', isAllowed: true, isMutation: false };
-    }
-    return { endpointClass: 'gmail.mutation.other', isAllowed: false, isMutation: true };
+    return { endpointClass: 'gmail.read.unexpected', isAllowed: false, isGmailMutation: false, isUnexpected: true };
   }
 
-  // 3. Calendar / Other Google endpoints
-  if (hostname.includes('calendar.googleapis.com') || pathname.includes('/calendar/v3/')) {
+  // 3. Calendar / Other Google Endpoints (Uncontracted -> Disallowed unexpected)
+  if (hostname === 'calendar.googleapis.com' || pathname.includes('/calendar/v3/')) {
     if (pathname.includes('/events')) {
       return {
         endpointClass: method === 'GET' ? 'calendar.events.list' : 'calendar.events.create',
-        isAllowed: true,
-        isMutation: false,
+        isAllowed: false,
+        isGmailMutation: false,
+        isUnexpected: true,
       };
     }
-    return { endpointClass: 'calendar.other', isAllowed: true, isMutation: false };
+    return { endpointClass: 'calendar.unexpected', isAllowed: false, isGmailMutation: false, isUnexpected: true };
   }
 
   return {
-    endpointClass: method === 'GET' ? 'google.read.other' : 'google.other',
-    isAllowed: method === 'GET',
-    isMutation: method !== 'GET',
+    endpointClass: method === 'GET' ? 'google.read.unexpected' : 'google.unexpected',
+    isAllowed: false,
+    isGmailMutation: false,
+    isUnexpected: true,
   };
 }
 
@@ -240,14 +247,13 @@ export function redactGoogleUrl(rawUrlInput: string | URL): string {
   try {
     parsed = typeof rawUrlInput === 'string' ? new URL(rawUrlInput) : new URL(rawUrlInput.toString());
   } catch {
-    // If not a full URL, attempt relative parsing with dummy base
     parsed = new URL(typeof rawUrlInput === 'string' ? rawUrlInput : rawUrlInput.toString(), 'https://gmail.googleapis.com');
   }
 
-  // 1. Strip ALL query parameters (tokens, search queries, page tokens, format, code, etc.)
+  // Strip query parameters
   parsed.search = '';
 
-  // 2. Redact path identifiers (user emails/IDs, message IDs, thread IDs, attachment IDs, draft IDs, label IDs)
+  // Redact path identifiers
   let redactedPath = parsed.pathname;
 
   redactedPath = redactedPath
@@ -272,14 +278,19 @@ export function redactGoogleUrl(rawUrlInput: string | URL): string {
 export class GoogleNetworkAuditor {
   private active = false;
   private throwOnMutation: boolean;
+  private throwOnUnexpected: boolean;
+  private summaryPath?: string;
   private totalRequests = 0;
   private allowedRequests = 0;
-  private mutationAttempts = 0;
+  private gmailMutationAttempts = 0;
+  private unexpectedRequests = 0;
   private endpointCounts = new Map<string, number>();
   private records: GoogleAuditRecordSummary[] = [];
 
   constructor(options?: GoogleNetworkAuditOptions) {
     this.throwOnMutation = options?.throwOnMutation ?? true;
+    this.throwOnUnexpected = options?.throwOnUnexpected ?? false;
+    this.summaryPath = options?.summaryPath;
     this.start();
   }
 
@@ -298,7 +309,8 @@ export class GoogleNetworkAuditor {
   reset(): void {
     this.totalRequests = 0;
     this.allowedRequests = 0;
-    this.mutationAttempts = 0;
+    this.gmailMutationAttempts = 0;
+    this.unexpectedRequests = 0;
     this.endpointCounts.clear();
     this.records = [];
   }
@@ -306,7 +318,7 @@ export class GoogleNetworkAuditor {
   /**
    * Intercept and record an HTTP request.
    * Redacts all sensitive parameters, classifies endpoint, updates counts,
-   * and optionally throws GoogleMutationDisallowedError on disallowed Gmail mutations.
+   * writes summary file if configured, and optionally throws on disallowed mutations/unexpected requests.
    */
   recordRequest(input: AuditRequestInput): AuditRecordResult {
     const method = (input.method || 'GET').toUpperCase();
@@ -322,10 +334,12 @@ export class GoogleNetworkAuditor {
       const key = `${method} ${classification.endpointClass}`;
       this.endpointCounts.set(key, (this.endpointCounts.get(key) ?? 0) + 1);
 
-      if (classification.isMutation || !classification.isAllowed) {
-        this.mutationAttempts += 1;
-      } else {
+      if (classification.isAllowed) {
         this.allowedRequests += 1;
+      } else if (classification.isGmailMutation) {
+        this.gmailMutationAttempts += 1;
+      } else {
+        this.unexpectedRequests += 1;
       }
 
       // Record MUST contain only method, endpointClass, and status.
@@ -335,6 +349,10 @@ export class GoogleNetworkAuditor {
         endpointClass: classification.endpointClass,
         status,
       });
+
+      if (this.summaryPath) {
+        this.persistSummary();
+      }
     }
 
     const result: AuditRecordResult = {
@@ -344,8 +362,12 @@ export class GoogleNetworkAuditor {
       redactedUrl,
     };
 
-    if (this.active && (classification.isMutation || !classification.isAllowed) && this.throwOnMutation) {
+    if (this.active && classification.isGmailMutation && this.throwOnMutation) {
       throw new GoogleMutationDisallowedError(method, classification.endpointClass, redactedUrl);
+    }
+
+    if (this.active && classification.isUnexpected && this.throwOnUnexpected) {
+      throw new GoogleUnexpectedEndpointError(method, classification.endpointClass, redactedUrl);
     }
 
     return result;
@@ -359,23 +381,58 @@ export class GoogleNetworkAuditor {
     for (const [k, v] of this.endpointCounts.entries()) {
       countsObj[k] = v;
     }
+    const disallowedRequests = this.gmailMutationAttempts + this.unexpectedRequests;
     return {
       totalRequests: this.totalRequests,
       allowedRequests: this.allowedRequests,
-      mutationAttempts: this.mutationAttempts,
-      zeroMutations: this.mutationAttempts === 0,
+      disallowedRequests,
+      gmailMutationAttempts: this.gmailMutationAttempts,
+      unexpectedRequests: this.unexpectedRequests,
+      zeroMutations: this.gmailMutationAttempts === 0,
+      zeroUnexpected: this.unexpectedRequests === 0,
       endpointCounts: countsObj,
       records: [...this.records],
     };
   }
 
   /**
+   * Writes the machine-readable summary JSON to summaryPath if specified.
+   */
+  private persistSummary(): void {
+    if (!this.summaryPath) return;
+    try {
+      const summary = this.getSummary();
+      const content = `${JSON.stringify(summary, null, 2)}\n`;
+      const fd = openSync(this.summaryPath, 'w');
+      try {
+        writeFileSync(fd, content, 'utf8');
+        fsyncSync(fd);
+      } finally {
+        // fd closed
+      }
+    } catch {
+      // Ignore file write errors in test environment if directory unavailable
+    }
+  }
+
+  /**
    * Asserts that zero Gmail mutations occurred. Throws if any mutation attempt was recorded.
    */
   assertZeroMutations(): void {
-    if (this.mutationAttempts > 0) {
+    if (this.gmailMutationAttempts > 0) {
       throw new Error(
-        `Google network audit failure: intercepted ${this.mutationAttempts} disallowed Gmail mutation attempt(s). Zero mutations policy violated.`,
+        `Google network audit failure: intercepted ${this.gmailMutationAttempts} disallowed Gmail mutation attempt(s). Zero mutations policy violated.`,
+      );
+    }
+  }
+
+  /**
+   * Asserts that zero unexpected requests (outside fixed allowed contract) occurred.
+   */
+  assertZeroUnexpected(): void {
+    if (this.unexpectedRequests > 0) {
+      throw new Error(
+        `Google network audit failure: intercepted ${this.unexpectedRequests} unexpected endpoint request(s) exceeding fixed allowed contract.`,
       );
     }
   }
@@ -407,4 +464,15 @@ export class GoogleNetworkAuditor {
  */
 export function startGoogleNetworkAudit(options?: GoogleNetworkAuditOptions): GoogleNetworkAuditor {
   return new GoogleNetworkAuditor(options);
+}
+
+/**
+ * Helper to wrap any fetch function with opt-in summary persistence for live Electron process auditing.
+ */
+export function createAuditedFetch<T extends (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+  fetchFn: T,
+  options?: GoogleNetworkAuditOptions,
+): T {
+  const auditor = startGoogleNetworkAudit(options);
+  return auditor.wrapFetch(fetchFn);
 }

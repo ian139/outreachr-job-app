@@ -29,6 +29,7 @@ import {
 import type { AppBootstrap, ConnectorStatus, DraftMessage, MeetingItem } from '../shared/contracts';
 import type { SecureStore } from './secure-store';
 import type { VaultService } from './vault-service';
+import { createAuditedFetch } from '../../e2e/support/google-network-audit';
 
 const MAX_CALENDAR_SYNC_PAGES = 10_000;
 const OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1_000;
@@ -39,6 +40,7 @@ interface ConnectorServiceOptions {
   secureStore: SecureStore;
   openExternal: (url: string) => Promise<void>;
   fetch?: typeof fetch;
+  auditSummaryPath?: string;
   now?: () => Date;
   authorizeForTest?: (request: PreparedAuthorizationRequest) => Promise<string>;
 }
@@ -429,7 +431,11 @@ export class ConnectorService {
     this.#secureStore = options.secureStore;
     this.#secureStore.bindVault(() => this.#vault.vault);
     this.#openExternal = options.openExternal;
-    this.#fetch = options.fetch ?? fetch;
+    const baseFetch = options.fetch ?? fetch;
+    const auditSummaryPath = options.auditSummaryPath ?? process.env.OUTREACHR_LIVE_SMOKE_AUDIT_PATH;
+    this.#fetch = auditSummaryPath
+      ? createAuditedFetch(baseFetch, { summaryPath: auditSummaryPath, throwOnMutation: false })
+      : baseFetch;
     this.#now = options.now ?? (() => new Date());
     this.#authorizeForTest = options.authorizeForTest;
   }

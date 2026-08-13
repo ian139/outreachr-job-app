@@ -1,45 +1,48 @@
-# Redacted Google Live-Smoke & Network Audit Mechanic
+# Redacted Google Live-Smoke & Network Audit Mechanic (Fail-Closed)
 
 ## Overview
 
 The Redacted Google Live-Smoke & Network Audit Mechanic is a main-owned acceptance tool designed for v0.2.0 release-readiness verification. It enforces strict read-only access and zero mutation policies when inspecting Google API traffic during live-smoke testing or automated Playwright provider mock execution.
 
-The mechanic inspects outbound network requests to Google OAuth and Gmail endpoints, classifies each request into a canonical endpoint class, redacts all sensitive parameters and content, and hard-fails any attempt to mutate Gmail state.
+The mechanic inspects outbound network requests to Google OAuth and Gmail endpoints, classifies each request into a canonical endpoint class, redacts all sensitive parameters and content, and hard-fails any attempt to mutate Gmail state or execute uncontracted operations.
 
 ---
 
-## Scope & Endpoint Taxonomy
+## Fail-Closed Scope & Endpoint Taxonomy
 
-### Allowed Endpoints
+### Allowed Contract (Strict & Fail-Closed)
 
-The network auditor permits only authentication and read-only retrieval operations:
+The network auditor permits ONLY authentication and explicit Gmail GET read operations:
 
 | Category | HTTP Method | Endpoint Class | Endpoint Pattern | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **OAuth** | `POST` / `GET` | `oauth.token` | `/token` | Code exchange and token refresh |
-| **OAuth** | `GET` | `oauth.authorize` | `/auth`, `/o/oauth2/v2/auth` | OAuth authorization flow |
-| **OAuth** | `POST` / `GET` | `oauth.revoke` | `/revoke` | Token revocation |
-| **OAuth** | `GET` | `oauth.userinfo` | `/userinfo` | Identity verification |
-| **Gmail** | `GET` | `gmail.messages.list` | `/users/:userId/messages` | Message list enumeration |
-| **Gmail** | `GET` | `gmail.messages.get` | `/users/:userId/messages/:messageId` | Single message metadata/read |
-| **Gmail** | `GET` | `gmail.attachments.get` | `/users/:userId/messages/:messageId/attachments/:attachmentId` | Attachment retrieval |
-| **Gmail** | `GET` | `gmail.threads.list` | `/users/:userId/threads` | Thread list enumeration |
-| **Gmail** | `GET` | `gmail.threads.get` | `/users/:userId/threads/:threadId` | Thread read |
-| **Gmail** | `GET` | `gmail.labels.list` | `/users/:userId/labels` | Label enumeration |
-| **Gmail** | `GET` | `gmail.labels.get` | `/users/:userId/labels/:labelId` | Label detail read |
-| **Gmail** | `GET` | `gmail.profile.get` | `/users/:userId/profile` | User profile read |
+| **OAuth** | `POST` / `GET` | `oauth.token` | `oauth2.googleapis.com/token` | Code exchange and token refresh |
+| **OAuth** | `GET` | `oauth.authorize` | `accounts.google.com/o/oauth2/v2/auth` | OAuth authorization flow |
+| **OAuth** | `GET` | `oauth.userinfo` | `www.googleapis.com/oauth2/v2/userinfo` | Identity verification |
+| **Gmail** | `GET` | `gmail.messages.list` | `gmail.googleapis.com/gmail/v1/users/:userId/messages` | Message list enumeration |
+| **Gmail** | `GET` | `gmail.messages.get` | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId` | Single message metadata/read |
+| **Gmail** | `GET` | `gmail.attachments.get` | `gmail.googleapis.com/gmail/v1/users/:userId/messages/:messageId/attachments/:attachmentId` | Attachment retrieval |
+| **Gmail** | `GET` | `gmail.threads.list` | `gmail.googleapis.com/gmail/v1/users/:userId/threads` | Thread list enumeration |
+| **Gmail** | `GET` | `gmail.threads.get` | `gmail.googleapis.com/gmail/v1/users/:userId/threads/:threadId` | Thread read |
 
-### Disallowed Gmail Mutations
+### Exact Host Matching
 
-ANY non-GET request to Gmail API endpoints is classified as a disallowed mutation and hard-fails immediately when `throwOnMutation` is enabled:
+Hostnames MUST match explicit approved domains (`oauth2.googleapis.com`, `accounts.google.com`, `www.googleapis.com`, `openidconnect.googleapis.com`, `gmail.googleapis.com`, `calendar.googleapis.com`, or loopback test interfaces `127.0.0.1`/`localhost`). Unapproved hostnames or spoofed subdomains are classified as `external.unexpected` and disallowed.
 
-- `POST /users/:userId/messages/send` (`gmail.messages.send`)
-- `POST /users/:userId/drafts` (`gmail.drafts.create`)
-- `POST /users/:userId/drafts/send` (`gmail.drafts.send`)
-- `DELETE /users/:userId/messages/:messageId` (`gmail.messages.delete`)
-- `PUT` or `PATCH` on messages (`gmail.messages.mutation`)
-- `POST /users/:userId/messages/:messageId/modify` (`gmail.messages.modify`)
-- `POST /users/:userId/threads/:threadId/modify` (`gmail.threads.modify`)
+### Disallowed Traffic Categorization
+
+The auditor separates disallowed traffic into two distinct metrics:
+
+1. **Gmail Mutation Attempts (`gmailMutationAttempts`):**
+   - `POST /users/:userId/messages/send` (`gmail.messages.send`)
+   - `POST /users/:userId/drafts` (`gmail.drafts.create`)
+   - `POST /users/:userId/drafts/send` (`gmail.drafts.send`)
+   - `DELETE /users/:userId/messages/:messageId` (`gmail.messages.delete`)
+   - `POST /users/:userId/messages/:messageId/modify` (`gmail.messages.modify`)
+   - `POST /users/:userId/threads/:threadId/modify` (`gmail.threads.modify`)
+
+2. **Unexpected Endpoint Requests (`unexpectedRequests`):**
+   - Uncontracted endpoints exceeding the fixed allowed contract: OAuth revoke (`oauth.revoke`), Gmail labels GET (`gmail.labels.get`), Gmail drafts GET (`gmail.drafts.get`), Gmail profile GET (`gmail.profile.get`), Calendar endpoints (`calendar.events.list`, `calendar.events.create`), external/spoofed hosts.
 
 ---
 
@@ -56,14 +59,15 @@ The network auditor guarantees that sensitive founder or contact data is NEVER p
 
 ## Machine-Readable Summary Structure
 
-The auditor generates a sanitized machine-readable summary object suitable for automated assertions and release attestations:
-
 ```json
 {
   "totalRequests": 3,
   "allowedRequests": 3,
-  "mutationAttempts": 0,
+  "disallowedRequests": 0,
+  "gmailMutationAttempts": 0,
+  "unexpectedRequests": 0,
   "zeroMutations": true,
+  "zeroUnexpected": true,
   "endpointCounts": {
     "POST oauth.token": 1,
     "GET gmail.messages.list": 1,
@@ -79,31 +83,11 @@ The auditor generates a sanitized machine-readable summary object suitable for a
 
 ---
 
-## Auditor Lifecycle API
+## Live Electron Process Audit Hook
 
-```typescript
-import { startGoogleNetworkAudit, GoogleNetworkAuditor } from '../apps/desktop/e2e/support/google-network-audit';
+`ConnectorService` in `apps/desktop/src/main/connector-service.ts` supports opt-in main-process fetch auditing via `process.env.OUTREACHR_LIVE_SMOKE_AUDIT_PATH` or `options.auditSummaryPath`.
 
-// 1. Start audit
-const auditor = startGoogleNetworkAudit({ throwOnMutation: true });
-
-// 2. Intercept or record requests
-auditor.recordRequest({
-  method: 'GET',
-  url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages',
-});
-
-// 3. Consume redacted summary
-const summary = auditor.getSummary();
-console.log(`Total: ${summary.totalRequests}, Zero Mutations: ${summary.zeroMutations}`);
-
-// 4. Assert zero mutations
-auditor.assertZeroMutations();
-
-// 5. Reset or stop
-auditor.reset();
-auditor.stop();
-```
+When set, all outbound fetch calls performed by `ConnectorService` pass through `createAuditedFetch`, writing/flushing the redacted summary JSON to the specified path after each request.
 
 ---
 
