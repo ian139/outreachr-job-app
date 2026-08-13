@@ -16,7 +16,7 @@ import { useWorkspace } from '../state/WorkspaceContext';
 const steps = ['Founder', 'Company', 'Round', 'Privacy', 'Ready'] as const;
 
 export function OnboardingFlow(): React.JSX.Element {
-  const { data, command, notify } = useWorkspace();
+  const { command, notify } = useWorkspace();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FounderSetupInput>({
@@ -351,10 +351,6 @@ export function OnboardingFlow(): React.JSX.Element {
                   <div>
                     <dt>Sender footer</dt>
                     <dd>{form.postalAddress?.trim() ? 'Configured' : 'Required before send'}</dd>
-                  </div>
-                  <div>
-                    <dt>Seed</dt>
-                    <dd>{data?.counts.firms ?? 192} firms</dd>
                   </div>
                 </dl>
                 <div className="ready-next">
