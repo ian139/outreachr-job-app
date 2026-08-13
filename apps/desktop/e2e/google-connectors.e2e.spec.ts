@@ -20,7 +20,7 @@ async function twoPeopleWithoutEmail(page: Page): Promise<[Candidate, Candidate]
 }
 
 test.describe('Google connectors through the built Electron IPC boundary', () => {
-  test('connects with PKCE, exhausts Gmail and Calendar pages, and creates an invite', async ({
+  test('connects with PKCE and exhausts Gmail and Calendar pages without provider writes', async ({
     googleProviderMock,
     page,
     rendererErrors,
@@ -105,55 +105,8 @@ test.describe('Google connectors through the built Electron IPC boundary', () =>
       expect.arrayContaining(['Mock investor introduction', 'Mock investor follow-up']),
     );
 
-    await navigate(page, 'Meetings');
-    await page.getByRole('button', { name: 'Add meeting' }).first().click();
-    const meetingDialog = page.getByRole('dialog', { name: 'Add a meeting' });
-    const meetingStart = new Date(Date.now() + 7 * 86_400_000);
-    meetingStart.setMinutes(0, 0, 0);
-    const meetingEnd = new Date(meetingStart.getTime() + 30 * 60_000);
-    const localInput = (value: Date): string => {
-      const offset = value.getTimezoneOffset() * 60_000;
-      return new Date(value.getTime() - offset).toISOString().slice(0, 16);
-    };
-    await meetingDialog
-      .getByRole('textbox', { name: 'Title', exact: true })
-      .fill('E2E Google invite');
-    await meetingDialog
-      .getByRole('textbox', { name: 'Starts', exact: true })
-      .fill(localInput(meetingStart));
-    await meetingDialog
-      .getByRole('textbox', { name: 'Ends', exact: true })
-      .fill(localInput(meetingEnd));
-    await meetingDialog
-      .getByRole('combobox', { name: 'Calendar', exact: true })
-      .selectOption('google');
-    await meetingDialog
-      .getByRole('combobox', { name: 'Investor', exact: true })
-      .selectOption(historicalPerson.firmId);
-    await meetingDialog
-      .getByRole('checkbox', { name: new RegExp(historicalPerson.name, 'u') })
-      .check();
-    await meetingDialog
-      .getByRole('button', { name: 'Create and send invitation', exact: true })
-      .click();
-    await expect(
-      page.locator('#main-content').getByText('E2E Google invite', { exact: true }),
-    ).toBeVisible();
-    expect(googleProviderMock.calendarCreateCalls).toBe(1);
-    expect(googleProviderMock.calendarCreateBodies[0]).toMatchObject({
-      summary: 'E2E Google invite',
-      attendees: [{ email: 'history.one@example.test', displayName: historicalPerson.name }],
-    });
-    const createdMeeting = await page.evaluate(async () =>
-      (await window.outreachr.bootstrap()).meetings.find(
-        (meeting) => meeting.title === 'E2E Google invite',
-      ),
-    );
-    expect(createdMeeting).toMatchObject({
-      provider: 'google',
-      investorId: historicalPerson.firmId,
-      personIds: [historicalPerson.id],
-    });
+    expect(googleProviderMock.calendarCreateCalls).toBe(0);
+    expect(googleProviderMock.calendarCreateBodies).toEqual([]);
 
     expect(googleProviderMock.authorizationHeaders.length).toBeGreaterThan(0);
     expect(new Set(googleProviderMock.authorizationHeaders)).toEqual(

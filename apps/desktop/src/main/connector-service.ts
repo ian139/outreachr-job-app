@@ -434,7 +434,11 @@ export class ConnectorService {
     const baseFetch = options.fetch ?? fetch;
     const auditSummaryPath = options.auditSummaryPath ?? process.env.OUTREACHR_LIVE_SMOKE_AUDIT_PATH;
     this.#fetch = auditSummaryPath
-      ? createAuditedFetch(baseFetch, { summaryPath: auditSummaryPath, throwOnMutation: false })
+      ? createAuditedFetch(baseFetch, {
+          summaryPath: auditSummaryPath,
+          throwOnMutation: true,
+          throwOnUnexpected: true,
+        })
       : baseFetch;
     this.#now = options.now ?? (() => new Date());
     this.#authorizeForTest = options.authorizeForTest;

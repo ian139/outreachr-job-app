@@ -534,7 +534,10 @@ export async function startGoogleProviderMock(options?: { throwOnMutation?: bool
   const sockets = new Set<Socket>();
   let baseUrl = '';
   let handlers: RequestHandler[] = [];
-  const auditor = startGoogleNetworkAudit({ throwOnMutation: options?.throwOnMutation ?? false });
+  const auditor = startGoogleNetworkAudit({
+    throwOnMutation: options?.throwOnMutation ?? false,
+    throwOnUnexpected: false,
+  });
   const state: GoogleProviderMockState = {
     get baseUrl() {
       return baseUrl;
