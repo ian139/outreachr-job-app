@@ -66,15 +66,15 @@ Dormant `RoundOverviewPage.tsx` and `PipelinePage.tsx` (**not verified**). Contr
 
 ### Ownership/interfaces/data
 
-Pages own presentation; command service owns validation and persistence; `RoundState`, `PipelineColumn`, and command maps are the sole interface. Preserve stage history and null amounts. If a migration is required, add a versioned migration plus backup/restore test; otherwise do not change schema.
+This is a composite packet with two non-overlapping owners. The **P2 main-contract lane** owns the `RoundState`, `PipelineColumn`, `PipelineStage`, `pipeline.move`, `pipeline.amount`, and `round.update` definitions in `apps/desktop/src/shared/contracts.ts`, plus command-service validation/persistence, stale-write/version checks, stage-history/audit preservation, and any required versioned migration. The **P2 renderer lane** owns only `RoundOverviewPage.tsx`, `PipelinePage.tsx`, and their feature-local tests/UI wiring; it consumes the reviewed contract and never reimplements transition or persistence rules. The main-contract lane must publish the payload/error/version shape before the renderer lane starts. A migration/schema change is permitted only through that lane, with the existing database owner as the single migration author; it must include backup/restore compatibility evidence, and no other packet may edit the same migration/schema files. If no migration is required, record that decision in the contract review rather than changing schema. Preserve stage history and null amounts; these typed contracts remain the sole interface.
 
 ### Safety/edge/accessibility
 
-Reject invalid stage transitions and stale writes; show network/provider failure without losing edits. Keyboard drag alternative must exist; cards need semantic headings, focus order, responsive horizontal scroll or list alternative, and color-independent status.
+The main-contract lane rejects invalid stage transitions and stale writes without losing history; the renderer lane shows the returned conflict/provider error and preserves unsaved edits for retry. Keyboard drag alternative must exist; cards need semantic headings, focus order, responsive horizontal scroll or list alternative, and color-independent status.
 
 ### Acceptance/evidence/order
 
-Unit tests cover valid/invalid transitions, null check, stale update, and round validation. Electron tests cover rendering and command error. Browser E2E exercises move and reload with synthetic state. Branch/worktree: `fork-round-pipeline`; depends on routing; parallel with most packets; merge before navigation/E2E gate.
+The main-contract lane provides focused unit/contract tests for valid/invalid transitions, null check, stale update/version conflicts, round validation, history retention, and (if applicable) migration backup/restore. The renderer lane provides Electron tests for rendering and command errors; browser E2E exercises move and reload with synthetic state. Branch/worktree: `fork-round-pipeline`; depends on routing and the P2 main-contract lane's reviewed contract; the P2 renderer lane cannot merge before that contract and any migration/schema review are complete. It may run alongside P1/P3/P4/P5 only when it does not edit their owned shared files; merge before navigation/E2E gate.
 
 ## 3. Up Next, tasks, meetings, and calendar
 
@@ -106,11 +106,11 @@ Dormant `KnowledgePage.tsx` and `DocumentsPage.tsx` (**not verified**). Contract
 
 ### Ownership/interfaces/data/privacy
 
-Renderer uses `knowledge.save`; main owns path validation, file selection, vault and sanitization. Do not introduce a second document store. Define supported file types/size limits before implementation; migration must preserve backup/export and avoid copying content into logs. Handle missing/moved files, malformed text, duplicate IDs, path traversal, and permission failures.
+This is a composite packet with two non-overlapping owners. The **P4 main-contract lane** owns the `KnowledgeItem`, `knowledge.save`, document metadata, file-selection/reveal payloads, and error contracts in `apps/desktop/src/shared/contracts.ts` and preload validation. It also owns the main path-confinement/file-type/size validation, file selection, vault/sanitization integration, idempotence rules, and any required versioned migration. The **P4 renderer lane** owns only `KnowledgePage.tsx`, `DocumentsPage.tsx`, and feature-local UI/tests; it consumes the reviewed contract and never reads files or performs path validation itself. The main-contract lane must define supported file types and size limits, rejection semantics, and the confinement root before renderer implementation. The existing database owner is the single migration/schema author: any migration must preserve backup/export compatibility and must be reviewed before the renderer lane merges; no other packet may edit those schema/migration files. If metadata can be represented without migration, record that decision in the contract review. Do not introduce a second document store or copy content into logs. Handle missing/moved files, malformed text, duplicate IDs, path traversal, and permission failures.
 
 ### Acceptance/evidence/order
 
-Unit tests cover sanitization, path confinement, and save idempotence; Electron tests cover select/reveal rejection; browser smoke uses temporary synthetic files. Accessibility includes labels, previews, focus trap, truncation, and responsive layout. Branch/worktree: `fork-knowledge-documents`; depends on agent context/privacy review if exposing notes; parallel otherwise.
+The main-contract lane provides focused unit/contract tests for sanitization, path confinement/file validation, save idempotence, rejection errors, and (if applicable) migration backup/restore/export compatibility. The renderer lane provides Electron tests for select/reveal rejection and command states; browser smoke uses temporary synthetic files. Accessibility includes labels, previews, focus trap, truncation, and responsive layout. Branch/worktree: `fork-knowledge-documents`; depends on routing, the reviewed P4 contract/service boundary, and agent context/privacy review if exposing notes; the renderer lane cannot merge before the main-contract lane and any migration/schema review. It may run in parallel with P1/P2/P3/P5 only when it does not edit their owned shared files.
 
 ## 5. Outreach and review
 
@@ -186,22 +186,24 @@ Handle missing subject/snippet, unknown sender, pagination, provider query limit
 
 ## 9. Typed parallel work-packet DAG and gates
 
-Packet type is one of: `renderer`, `main-contract`, `security-review`, `e2e-review`. Useful concurrency is capped at five implementation packets:
+Packet type is one of: `renderer`, `main-contract`, `security-review`, `e2e-review`, or a **composite packet** with explicitly named, non-overlapping lanes. Useful concurrency is capped at five implementation packets; lanes in one composite packet are ordered when they share a contract/service/schema boundary:
 
 ```text
 P0 routing-navigation (renderer) ─┬─> P1 investors/lists/introductions (renderer)
-                                 ├─> P2 round/pipeline (renderer)
+                                 ├─> P2c round/pipeline contract+service+schema (main-contract)
+                                 │    └─> P2r round/pipeline UI (renderer)
                                  ├─> P3 up-next/calendar (renderer)
-                                 ├─> P4 knowledge/documents (renderer)
+                                 ├─> P4c knowledge/documents contract+service+schema (main-contract)
+                                 │    └─> P4r knowledge/documents UI (renderer)
                                  └─> P5 gmail-relevant-inbox (main-contract + renderer)
-P1 + P2 ─> P6 outreach/review (renderer + security-review)
-P4 + P6 ─> P7 agent-workflow (renderer + security-review)
+P1 + P2r ─> P6 outreach/review (renderer + security-review)
+P4r + P6 ─> P7 agent-workflow (renderer + security-review)
 P0..P7 ─> P8 integration/e2e-review (e2e-review)
 ```
 
-P1–P5 may run concurrently after P0's route contract is written; P6 waits for stable entity IDs and privacy review; P7 waits for context and draft contracts. Shared bottlenecks are `App.tsx`, `AppShell.tsx`, `shared/contracts.ts`, and main command/connector services. Assign one integration owner for each file; parallel workers submit narrow patches and do not reformat. Each packet must return changed paths, tests/evidence, invariants checked, and known gaps.
+P1/P3/P5 and each `c` lane may run concurrently after P0's route contract is written, but only one owner may edit a given shared contract, service, schema, migration, or routing file at a time. P2r starts only after P2c's typed payload/error/version contract and any migration decision are reviewed; P4r starts only after P4c's typed payload/error/path-confinement contract and any migration decision are reviewed. P2c and P4c each have sole ownership of their listed feature contract/service/schema changes; the existing database owner is the sole migration author, and unrelated packets must submit dependent patches rather than edit those files. P6 waits for stable entity IDs and privacy review; P7 waits for context and draft contracts. Shared bottlenecks are `App.tsx`, `AppShell.tsx`, `shared/contracts.ts`, and main command/connector services. Assign one integration owner for each file, serialize conflicting patches, and do not reformat. Each packet must return changed paths, tests/evidence, invariants checked, and known gaps.
 
-Review gates: (G1) source-fact audit before implementation; (G2) typed contract review; (G3) privacy/security review for mail, documents, agents, and sending; (G4) focused unit/Electron evidence; (G5) browser accessibility/responsive evidence; (G6) final diff checks that no source outside assignment changed and no dormant page is called verified without evidence. Risks: route conflicts, contract drift, provider query semantics, stale hashes, accidental send, private-data leakage, migration incompatibility, and flaky provider mocks. Mitigate with typed seams, synthetic fixtures, deterministic clocks, explicit command assertions, and serialized shared-file integration.
+Review gates: (G1) source-fact audit before implementation; (G2) typed contract review, including P2c/P4c payloads and ownership; (G3) privacy/security review for mail, documents, agents, and sending; (G4) focused unit/Electron evidence; (G5) browser accessibility/responsive evidence; (G6) final diff checks that no source outside assignment changed and no dormant page is called verified without evidence. Risks: route conflicts, contract drift, provider query semantics, stale hashes, accidental send, private-data leakage, migration incompatibility, and flaky provider mocks. Mitigate with typed seams, synthetic fixtures, deterministic clocks, explicit command assertions, and serialized shared-file integration.
 
 ## 10. Open decisions (must be resolved, recorded, and tested)
 
