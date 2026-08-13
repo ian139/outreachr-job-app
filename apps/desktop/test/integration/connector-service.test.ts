@@ -137,7 +137,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     const configured = await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     expect(configured).toMatchObject({ provider: 'google', state: 'configured' });
 
@@ -146,7 +146,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
       provider: 'google',
       state: 'connected',
       accountEmail: 'founder@local.test',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
       encryptionAvailable: true,
     });
     expect(connected.scopes).toEqual(
@@ -157,6 +157,14 @@ describe('ConnectorService with MSW provider boundaries', () => {
       ]),
     );
     expect(connected.scopes).not.toContain('https://www.googleapis.com/auth/gmail.readonly');
+    expect(connected.capabilities).toEqual({
+      canReadInbox: false,
+      canSyncRelationships: false,
+      canDraft: true,
+      canSend: true,
+      canReadCalendar: true,
+      canWriteCalendar: true,
+    });
     expect(openExternal).not.toHaveBeenCalled();
 
     const config = vault.vault.one<{
@@ -164,10 +172,15 @@ describe('ConnectorService with MSW provider boundaries', () => {
       secret_ref: string;
     }>('SELECT public_config_json,secret_ref FROM connector_configs WHERE provider=?', ['google']);
     expect(config?.public_config_json).toContain('founder-owned-desktop-client');
+    expect(config?.public_config_json).toContain('"scopeProfile":"minimum"');
+    expect(config?.public_config_json).toContain('"canSend":true');
     expect(config?.public_config_json).not.toContain('google-access');
     expect(config?.secret_ref).toBe('secure-store://oauth/google/tokens');
     expect(Buffer.from(vault.vault.export()).includes(Buffer.from('google-refresh'))).toBe(false);
-    await expect(connector.syncMail('google')).rejects.toThrow('relationship-sync read scope');
+    await expect(connector.syncMail('google')).rejects.toThrow('relationship-sync profile');
+    expect(() => connector.getMailConnector('google', 'founder@local.test')).toThrow(
+      'Inbox reading is not enabled',
+    );
 
     await expect(connector.disconnect('google')).resolves.toMatchObject({
       provider: 'google',
@@ -187,6 +200,156 @@ describe('ConnectorService with MSW provider boundaries', () => {
     expect(disconnectAudit?.detail_json).not.toContain('founder-owned-desktop-client');
   });
 
+  it('grants exactly the Google read-only scopes and gates drafts, sends, and calendar', async () => {
+    let gmailSendCalls = 0;
+    successfulGoogleHandlers(() => {
+      gmailSendCalls += 1;
+    });
+    const { vault, connector } = await fixture();
+    const person = firstPersonWithoutEmail(vault);
+    await vault.addPersonContact({
+      personId: person.id,
+      kind: 'work_email',
+      value: 'read-only-recipient@example.test',
+      visibility: 'private',
+      contributionEligible: false,
+    });
+    // Composed before the connector exists (founder work-email fallback), the
+    // draft keeps the exact compliance footer so it can be approved later.
+    const draft = await vault.createDraft({
+      personId: person.id,
+      provider: 'google',
+      kind: 'initial',
+      subject: 'Read-only send gate',
+      bodyText: 'This request must never reach the Gmail send endpoint.',
+    });
+
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      scopeProfile: 'read-only',
+    });
+    const connected = await connector.connect('google');
+    expect(connected).toMatchObject({
+      provider: 'google',
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+      scopeProfile: 'read-only',
+      encryptionAvailable: true,
+    });
+    expect(connected.scopes).toEqual([
+      'openid',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ]);
+    expect(connected.capabilities).toEqual({
+      canReadInbox: true,
+      canSyncRelationships: false,
+      canDraft: false,
+      canSend: false,
+      canReadCalendar: false,
+      canWriteCalendar: false,
+    });
+
+    const persisted = vault.vault.one<{ public_config_json: string; scopes_json: string }>(
+      'SELECT public_config_json,scopes_json FROM connector_configs WHERE provider=?',
+      ['google'],
+    );
+    expect(JSON.parse(persisted!.public_config_json)).toMatchObject({
+      scopeProfile: 'read-only',
+      capabilities: {
+        canReadInbox: true,
+        canDraft: false,
+        canSend: false,
+        canWriteCalendar: false,
+      },
+    });
+    expect(JSON.parse(persisted!.public_config_json)).not.toHaveProperty('relationshipSync');
+    expect(JSON.parse(persisted!.scopes_json)).toEqual(connected.scopes);
+
+    // Inbox reading is available under read-only…
+    const mailbox = connector.getMailConnector('google', 'founder@local.test');
+    await expect(
+      mailbox.listMailboxMessages({ accountEmail: 'founder@local.test', mailbox: 'all' }),
+    ).resolves.toMatchObject({ messages: [] });
+
+    // …but relationship reconciliation and calendar access are not.
+    await expect(connector.syncMail('google')).rejects.toThrow('relationship-sync profile');
+    await expect(connector.syncCalendar('google')).rejects.toThrow(
+      'does not include calendar reading',
+    );
+    await expect(
+      connector.createMeeting({
+        provider: 'google',
+        title: 'Read-only must not create events',
+        startsAt: '2026-08-20T10:00:00.000Z',
+        endsAt: '2026-08-20T11:00:00.000Z',
+        personIds: [],
+      }),
+    ).rejects.toThrow('cannot create calendar events');
+
+    // New draft composition is gated for the read-only account.
+    await expect(
+      vault.createDraft({
+        personId: person.id,
+        provider: 'google',
+        kind: 'initial',
+        subject: 'Read-only draft gate',
+        bodyText: 'This draft must not be created.',
+      }),
+    ).rejects.toThrow('read-only access');
+
+    // The pre-existing draft can be approved locally, but the capability gate
+    // still fails before reconciliation, reservation, or any provider HTTP.
+    const approved = await vault.approveDraft(draft.id, draft.contentHash);
+    expect(approved.approvalState).toBe('approved');
+    await expect(connector.sendApprovedDraft(approved.id, approved.contentHash)).rejects.toThrow(
+      'which cannot send',
+    );
+    expect(gmailSendCalls).toBe(0);
+    expect(Number(vault.vault.scalar('SELECT COUNT(*) FROM send_ledger'))).toBe(0);
+  });
+
+  it('reconnects with the explicitly selected profile and never silently upgrades', async () => {
+    successfulGoogleHandlers();
+    const { connector } = await fixture();
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      scopeProfile: 'read-only',
+    });
+    await connector.connect('google');
+    let status = (await connector.statuses()).find((item) => item.provider === 'google')!;
+    expect(status).toMatchObject({
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+      scopeProfile: 'read-only',
+    });
+    expect(status.capabilities.canSend).toBe(false);
+    expect(status.scopes).not.toContain('https://www.googleapis.com/auth/gmail.send');
+
+    // Reconnecting with relationship sync is the explicit reauthorization path.
+    await connector.configure({
+      provider: 'google',
+      clientId: 'founder-owned-desktop-client',
+      scopeProfile: 'relationship-sync',
+    });
+    await connector.connect('google');
+    status = (await connector.statuses()).find((item) => item.provider === 'google')!;
+    expect(status).toMatchObject({
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+      scopeProfile: 'relationship-sync',
+    });
+    expect(status.capabilities).toMatchObject({
+      canReadInbox: true,
+      canSyncRelationships: true,
+      canSend: true,
+    });
+    expect(status.scopes).toContain('https://www.googleapis.com/auth/gmail.readonly');
+    expect(status.scopes).toContain('https://www.googleapis.com/auth/gmail.send');
+  });
+
   it('rebinds connector secrets to the authenticated replacement vault after backup restore', async () => {
     successfulGoogleHandlers();
     const { vault, secureStore, connector } = await fixture();
@@ -195,7 +358,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
     const backupPath = await vault.exportBackup(backupDirectory, 'correct horse battery staple');
@@ -228,7 +391,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -281,7 +444,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -351,7 +514,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
       provider: 'microsoft',
       clientId: 'founder-owned-microsoft-client',
       tenantId: 'common',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('microsoft');
     const person = firstPersonWithoutEmail(vault);
@@ -450,7 +613,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -537,7 +700,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
     await secureStore.set('oauth/google/tokens', {
@@ -614,7 +777,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
 
@@ -696,7 +859,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
 
@@ -737,7 +900,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
 
@@ -800,7 +963,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -896,7 +1059,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
       provider: 'microsoft',
       clientId: 'founder-owned-microsoft-client',
       tenantId: 'common',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('microsoft');
     const person = firstPersonWithoutEmail(vault);
@@ -1043,10 +1206,10 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     const connected = await connector.connect('google');
-    expect(connected).toMatchObject({ relationshipSync: true, state: 'connected' });
+    expect(connected).toMatchObject({ scopeProfile: 'relationship-sync', state: 'connected' });
     expect(connected.scopes).toContain('https://www.googleapis.com/auth/gmail.readonly');
 
     vault.vault.run(`CREATE TRIGGER test_mail_import_rollback
@@ -1185,7 +1348,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
 
@@ -1271,7 +1434,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
 
@@ -1298,7 +1461,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -1319,7 +1482,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     const approved = await vault.approveDraft(draft.id, draft.contentHash);
 
     await expect(connector.sendApprovedDraft(approved.id, approved.contentHash)).rejects.toThrow(
-      'relationship-sync read scope',
+      'which cannot send',
     );
     expect(gmailSendCalls).toBe(0);
     expect(Number(vault.vault.scalar('SELECT COUNT(*) FROM send_ledger'))).toBe(0);
@@ -1334,7 +1497,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
     });
     await connector.connect('google');
     const person = firstPersonWithoutEmail(vault);
@@ -1380,7 +1543,7 @@ describe('ConnectorService with MSW provider boundaries', () => {
     await connector.configure({
       provider: 'google',
       clientId: 'founder-owned-desktop-client',
-      relationshipSync: false,
+      scopeProfile: 'minimum',
     });
 
     await expect(connector.connect('google')).rejects.toThrow('state did not match');

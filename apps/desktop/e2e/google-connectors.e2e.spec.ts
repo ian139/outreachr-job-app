@@ -37,7 +37,7 @@ test.describe('Google connectors through the built Electron IPC boundary', () =>
     await googleSection
       .getByRole('textbox', { name: 'Application (client) ID' })
       .fill('e2e-founder-owned-desktop-client');
-    await googleSection.getByRole('checkbox', { name: /Enable relationship sync/u }).check();
+    await googleSection.getByRole('radio', { name: /Relationship sync/u }).check();
     await googleSection.getByRole('button', { name: 'Save and connect in browser' }).click();
 
     await expect(page.getByText('Google connected', { exact: true })).toBeVisible();

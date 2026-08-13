@@ -17,7 +17,12 @@ import {
   type CoreVault,
 } from '@outreachr/core';
 import { openNodeVault } from '@outreachr/core/node';
-import type { CalendarEvent, MailboxMessage } from '@outreachr/connectors';
+import {
+  getCapabilities,
+  resolveScopeProfile,
+  type CalendarEvent,
+  type MailboxMessage,
+} from '@outreachr/connectors';
 import { z } from 'zod';
 import type {
   ActivityItem,
@@ -322,7 +327,8 @@ const DEFAULT_CONNECTORS: ConnectorStatus[] = [
     state: 'not_configured',
     accountEmail: null,
     scopes: [],
-    relationshipSync: false,
+    scopeProfile: 'minimum',
+    capabilities: getCapabilities('minimum'),
     lastSyncAt: null,
     error: null,
     encryptionAvailable: false,
@@ -332,7 +338,8 @@ const DEFAULT_CONNECTORS: ConnectorStatus[] = [
     state: 'not_configured',
     accountEmail: null,
     scopes: [],
-    relationshipSync: false,
+    scopeProfile: 'minimum',
+    capabilities: getCapabilities('minimum'),
     lastSyncAt: null,
     error: null,
     encryptionAvailable: false,
@@ -1283,6 +1290,25 @@ export class VaultService {
       });
   }
 
+  #connectorProfile(publicConfigJson: string): 'read-only' | 'minimum' | 'relationship-sync' {
+    try {
+      const publicConfig = JSON.parse(publicConfigJson) as Record<string, unknown>;
+      return resolveScopeProfile({
+        scopeProfile: publicConfig.scopeProfile as
+          | 'read-only'
+          | 'minimum'
+          | 'relationship-sync'
+          | undefined,
+        relationshipSync:
+          typeof publicConfig.relationshipSync === 'boolean'
+            ? publicConfig.relationshipSync
+            : undefined,
+      });
+    } catch {
+      return 'minimum';
+    }
+  }
+
   #draftReadiness(
     message: MessageRow,
     person: PersonSummary | undefined,
@@ -1362,11 +1388,21 @@ export class VaultService {
         `Connect ${message.provider === 'google' ? 'Google Workspace' : 'Microsoft 365'} as ${message.sender_address} before sending.`,
       );
     } else {
-      let relationshipSync = false;
+      let scopeProfile: 'read-only' | 'minimum' | 'relationship-sync' = 'minimum';
       let scopes: string[] = [];
       try {
         const publicConfig = JSON.parse(connector.public_config_json) as Record<string, unknown>;
-        relationshipSync = publicConfig.relationshipSync === true;
+        scopeProfile = resolveScopeProfile({
+          scopeProfile: publicConfig.scopeProfile as
+            | 'read-only'
+            | 'minimum'
+            | 'relationship-sync'
+            | undefined,
+          relationshipSync:
+            typeof publicConfig.relationshipSync === 'boolean'
+              ? publicConfig.relationshipSync
+              : undefined,
+        });
         const parsedScopes = JSON.parse(connector.scopes_json) as unknown;
         scopes = Array.isArray(parsedScopes)
           ? parsedScopes.filter((scope): scope is string => typeof scope === 'string')
@@ -1378,9 +1414,12 @@ export class VaultService {
         message.provider === 'google'
           ? 'https://www.googleapis.com/auth/gmail.readonly'
           : 'Mail.ReadBasic';
-      if (!relationshipSync || !scopes.includes(readScope)) {
+      const capabilities = getCapabilities(scopeProfile);
+      if (!capabilities.canSend || !scopes.includes(readScope)) {
         sendBlockReasons.push(
-          'Reconnect this provider with relationship sync enabled; complete mailbox reconciliation is required before sending.',
+          scopeProfile === 'read-only'
+            ? 'This account is connected with read-only access; reconnect with relationship sync enabled before sending.'
+            : 'Reconnect this provider with relationship sync enabled; complete mailbox reconciliation is required before sending.',
         );
       }
     }
@@ -2838,10 +2877,15 @@ export class VaultService {
     const now = this.#now().toISOString();
     const id = `message:${randomUUID()}`;
     const round = this.#roundRow();
-    const connectorAccount = this.#vault.one<{ account_label: string }>(
-      "SELECT account_label FROM connector_configs WHERE provider=? AND status='connected' ORDER BY updated_at DESC LIMIT 1",
+    const connectorAccount = this.#vault.one<{ account_label: string; public_config_json: string }>(
+      "SELECT account_label,public_config_json FROM connector_configs WHERE provider=? AND status='connected' ORDER BY updated_at DESC LIMIT 1",
       [input.provider],
     );
+    if (connectorAccount && this.#connectorProfile(connectorAccount.public_config_json) === 'read-only') {
+      throw new Error(
+        'This account is connected with read-only access; reconnect with relationship sync enabled before drafting or sending.',
+      );
+    }
     const founderEmail = this.#vault.scalar(
       'SELECT work_email FROM founder_profiles ORDER BY created_at LIMIT 1',
     );
@@ -3129,6 +3173,18 @@ export class VaultService {
     threadId?: string | null;
     replyToMessageId?: string | null;
   }): Promise<ApplicationDraftRecord> {
+    const connectorAccount = this.#vault.one<{ public_config_json: string }>(
+      "SELECT public_config_json FROM connector_configs WHERE provider=? AND lower(trim(account_label))=lower(trim(?)) AND status='connected' ORDER BY updated_at DESC LIMIT 1",
+      [input.provider, input.accountEmail],
+    );
+    if (
+      connectorAccount &&
+      this.#connectorProfile(connectorAccount.public_config_json) === 'read-only'
+    ) {
+      throw new Error(
+        'This account is connected with read-only access; reconnect with relationship sync enabled before drafting or sending.',
+      );
+    }
     const now = this.#now().toISOString();
     const draft = this.#repository.createApplicationDraft(input, now);
     await this.persist();

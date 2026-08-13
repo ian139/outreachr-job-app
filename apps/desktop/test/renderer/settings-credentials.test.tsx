@@ -60,7 +60,15 @@ describe('credential setup guidance and renderer boundary', () => {
     const configured: ConnectorStatus = {
       ...fixture.connectors[0]!,
       state: 'configured',
-      relationshipSync: true,
+      scopeProfile: 'relationship-sync',
+      capabilities: {
+        canReadInbox: true,
+        canSyncRelationships: true,
+        canDraft: true,
+        canSend: true,
+        canReadCalendar: true,
+        canWriteCalendar: true,
+      },
       scopes: [
         'openid',
         'https://www.googleapis.com/auth/userinfo.email',
@@ -95,14 +103,14 @@ describe('credential setup guidance and renderer boundary', () => {
     fireEvent.change(clientId, {
       target: { value: '123456789.apps.googleusercontent.com' },
     });
-    fireEvent.click(within(google).getByRole('checkbox', { name: /Enable relationship sync/u }));
+    fireEvent.click(within(google).getByRole('radio', { name: /Relationship sync/u }));
     fireEvent.click(within(google).getByRole('button', { name: 'Save and connect in browser' }));
 
     await waitFor(() =>
       expect(command).toHaveBeenCalledWith('connector.configure', {
         provider: 'google',
         clientId: '123456789.apps.googleusercontent.com',
-        relationshipSync: true,
+        scopeProfile: 'relationship-sync',
       }),
     );
     await waitFor(() =>
@@ -114,6 +122,101 @@ describe('credential setup guidance and renderer boundary', () => {
       expect(payload).not.toHaveProperty('refreshToken');
       expect(payload).not.toHaveProperty('authorizationCode');
     }
+  });
+
+  it('shows read-only access as reviewable and gates send and calendar actions', async () => {
+    const fixture = bootstrapFixture();
+    fixture.connectors[0] = {
+      ...fixture.connectors[0]!,
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+      scopeProfile: 'read-only',
+      capabilities: {
+        canReadInbox: true,
+        canSyncRelationships: false,
+        canDraft: false,
+        canSend: false,
+        canReadCalendar: false,
+        canWriteCalendar: false,
+      },
+      scopes: [
+        'openid',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ],
+    };
+    installBridge(fixture);
+    renderSettings('#/settings/connectors');
+
+    await screen.findByRole('heading', { name: 'Google Workspace' });
+    const google = section('Google Workspace');
+    expect(within(google).getByText('Read-only')).toBeVisible();
+    expect(within(google).getByText(/Read-only access: inbox reading only/u)).toBeVisible();
+    expect(
+      within(google).queryByRole('button', { name: 'Sync mail history' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(google).queryByRole('button', { name: 'Sync calendar' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(within(google).getByRole('button', { name: 'Reconnect to change access' }));
+    expect(within(google).getByRole('radio', { name: /Read-only/u })).toBeChecked();
+    expect(
+      within(google).getByRole('button', { name: 'Reconnect with selected access' }),
+    ).toBeVisible();
+  });
+
+  it('reconnects only with the explicitly selected profile', async () => {
+    const fixture = bootstrapFixture();
+    fixture.connectors[0] = {
+      ...fixture.connectors[0]!,
+      state: 'connected',
+      accountEmail: 'founder@local.test',
+      scopeProfile: 'read-only',
+      capabilities: {
+        canReadInbox: true,
+        canSyncRelationships: false,
+        canDraft: false,
+        canSend: false,
+        canReadCalendar: false,
+        canWriteCalendar: false,
+      },
+      scopes: [
+        'openid',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ],
+    };
+    const command = vi.fn(async (name: string, payload: Record<string, unknown>) => {
+      void payload;
+      if (name === 'connector.configure') return fixture.connectors[0];
+      if (name === 'connector.connect') return fixture.connectors[0];
+      throw new Error(`Unexpected command: ${name}`);
+    });
+    installBridge(fixture, command as never);
+    renderSettings('#/settings/connectors');
+
+    await screen.findByRole('heading', { name: 'Google Workspace' });
+    const google = section('Google Workspace');
+    fireEvent.click(within(google).getByRole('button', { name: 'Reconnect to change access' }));
+    fireEvent.change(within(google).getByPlaceholderText('Paste the provider-issued client ID'), {
+      target: { value: '123456789.apps.googleusercontent.com' },
+    });
+    fireEvent.click(within(google).getByRole('radio', { name: /^Standard/u }));
+    fireEvent.click(
+      within(google).getByRole('button', { name: 'Reconnect with selected access' }),
+    );
+
+    await waitFor(() =>
+      expect(command).toHaveBeenCalledWith('connector.configure', {
+        provider: 'google',
+        clientId: '123456789.apps.googleusercontent.com',
+        scopeProfile: 'minimum',
+      }),
+    );
+    await waitFor(() =>
+      expect(command).toHaveBeenCalledWith('connector.connect', { provider: 'google' }),
+    );
   });
 
   it('keeps setup failures actionable and blocks connection without protected storage', async () => {

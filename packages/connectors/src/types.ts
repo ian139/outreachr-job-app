@@ -1,5 +1,26 @@
 export type ConnectorProvider = 'google' | 'microsoft';
 
+/**
+ * Provider-neutral capability summary for a connector scope profile. The
+ * profile is persisted and exposed explicitly so inbox reading is never
+ * conflated with send-ready relationship sync: read-only grants inbox reads
+ * without any draft/send or calendar-write capability.
+ */
+export interface ConnectorCapabilities {
+  /** Inbox and thread reading (Gmail readonly or Mail.ReadBasic) is granted. */
+  canReadInbox: boolean;
+  /** Complete mailbox reconciliation for relationship history is granted. */
+  canSyncRelationships: boolean;
+  /** Composing drafts for this provider is available. */
+  canDraft: boolean;
+  /** Exact-content approved sending is available. */
+  canSend: boolean;
+  /** Calendar reads (events and free-busy) are available. */
+  canReadCalendar: boolean;
+  /** Calendar writes (event creation) are available. */
+  canWriteCalendar: boolean;
+}
+
 export type EmailMessageKind = 'initial' | 'follow_up' | 'intro_request' | 'reply';
 
 /**

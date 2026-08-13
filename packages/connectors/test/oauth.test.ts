@@ -6,10 +6,12 @@ import {
   createLoopbackRedirectUri,
   createPkcePair,
   exchangeAuthorizationCode,
+  getCapabilities,
   getScopes,
   prepareDesktopAuthorization,
   PROVIDER_DRAFT_SCOPES,
   refreshAccessToken,
+  resolveScopeProfile,
   tokenEndpoint,
   validateOAuthCallback,
 } from '../src/index.js';
@@ -39,6 +41,40 @@ describe('desktop OAuth and PKCE', () => {
     expect(url.searchParams.get('client_secret')).toBeNull();
     expect(url.searchParams.get('scope')).toContain('gmail.readonly');
     expect(url.searchParams.get('access_type')).toBe('offline');
+  });
+
+  it('grants exactly the Google read-only scopes with no send or calendar scopes', async () => {
+    const request = await prepareDesktopAuthorization({
+      provider: 'google',
+      clientId: 'google-desktop-client',
+      redirectUri: createLoopbackRedirectUri(48_231),
+      scopeProfile: 'read-only',
+    });
+    const expected = [
+      'openid',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ];
+    expect(request.scopes).toEqual(expected);
+    expect(new URL(request.authorizationUrl).searchParams.get('scope')).toBe(expected.join(' '));
+    expect(request.scopes).not.toContain('https://www.googleapis.com/auth/gmail.send');
+    expect(request.scopes).not.toContain('https://www.googleapis.com/auth/gmail.compose');
+    expect(request.scopes.some((scope) => scope.includes('calendar'))).toBe(false);
+    expect(getScopes('google', 'read-only')).toEqual(expected);
+    expect(getCapabilities('read-only')).toEqual({
+      canReadInbox: true,
+      canSyncRelationships: false,
+      canDraft: false,
+      canSend: false,
+      canReadCalendar: false,
+      canWriteCalendar: false,
+    });
+    expect(getCapabilities('relationship-sync').canSend).toBe(true);
+    expect(resolveScopeProfile({})).toBe('minimum');
+    expect(resolveScopeProfile({ relationshipSync: true })).toBe('relationship-sync');
+    expect(
+      resolveScopeProfile({ scopeProfile: 'read-only', relationshipSync: true }),
+    ).toBe('read-only');
   });
 
   it('uses Microsoft delegated scopes and tenant-specific endpoints', async () => {

@@ -5,19 +5,23 @@ import {
   createLoopbackRedirectUri,
   exchangeAuthorizationCode,
   fingerprintEmail,
+  getCapabilities,
   getScopes,
   GoogleConnector,
   MicrosoftConnector,
   normalizeEmail,
   prepareDesktopAuthorization,
   refreshAccessToken,
+  resolveScopeProfile,
   validateOAuthCallback,
-  type ConnectorProvider,
   type CalendarEvent,
+  type ConnectorCapabilities,
+  type ConnectorProvider,
   type EmailMessage,
   type OAuthTokenSet,
   type PreparedAuthorizationRequest,
   type RelationshipMailConnector,
+  type ScopeProfile,
   type SendAttemptLedger,
   type SendContext,
   type SendReceipt,
@@ -42,7 +46,16 @@ interface ConnectorServiceOptions {
 interface PublicConfig {
   clientId: string;
   tenantId?: string;
-  relationshipSync: boolean;
+  /** Explicitly selected provider-neutral access profile (authoritative). */
+  scopeProfile: ScopeProfile;
+  /** Capability summary derived from and persisted alongside the profile. */
+  capabilities: ConnectorCapabilities;
+  /**
+   * Pre-0.2 legacy flag; only present on vault rows written before the
+   * explicit profile. resolveScopeProfile maps it for migration, and new
+   * rows never write it.
+   */
+  relationshipSync?: boolean;
   lastSyncAt?: string;
   lastCalendarSyncAt?: string;
   lastMailSyncAt?: string;
@@ -118,7 +131,7 @@ export async function loopbackCallback(
   provider: ConnectorProvider,
   clientId: string,
   tenantId: string | undefined,
-  relationshipSync: boolean,
+  scopeProfile: ScopeProfile,
   openExternal: (url: string) => Promise<void>,
   authorizeForTest?: (request: PreparedAuthorizationRequest) => Promise<string>,
   timeoutMs = OAUTH_CALLBACK_TIMEOUT_MS,
@@ -133,7 +146,7 @@ export async function loopbackCallback(
         '/oauth/callback',
         provider === 'microsoft' ? 'localhost' : '127.0.0.1',
       ),
-      scopeProfile: relationshipSync ? 'relationship-sync' : 'minimum',
+      scopeProfile,
     });
     return { callbackUrl: await authorizeForTest(prepared), prepared };
   }
@@ -173,7 +186,7 @@ export async function loopbackCallback(
       clientId,
       ...(tenantId ? { tenant: tenantId } : {}),
       redirectUri,
-      scopeProfile: relationshipSync ? 'relationship-sync' : 'minimum',
+      scopeProfile,
     });
     const callback = new Promise<string>((resolve, reject) => {
       let completed = false;
@@ -433,14 +446,38 @@ export class ConnectorService {
       'SELECT public_config_json,account_label,status,scopes_json FROM connector_configs WHERE id=?',
       [connectorId(provider)],
     );
-    return row
-      ? {
-          publicConfig: parseJson<PublicConfig>(row.public_config_json),
-          accountLabel: row.account_label,
-          status: row.status,
-          scopes: parseJson<string[]>(row.scopes_json),
-        }
-      : null;
+    if (!row) return null;
+    const raw = parseJson<{
+      clientId: string;
+      tenantId?: string;
+      relationshipSync?: boolean;
+      scopeProfile?: ScopeProfile;
+      capabilities?: ConnectorCapabilities;
+      lastSyncAt?: string;
+      lastCalendarSyncAt?: string;
+      lastMailSyncAt?: string;
+      mailHistoryComplete?: boolean;
+      mailIdentityDigest?: string;
+      mailSyncProgress?: MailSyncProgress;
+    }>(row.public_config_json);
+    const scopeProfile = resolveScopeProfile(raw);
+    return {
+      publicConfig: {
+        clientId: raw.clientId,
+        ...(raw.tenantId ? { tenantId: raw.tenantId } : {}),
+        scopeProfile,
+        capabilities: raw.capabilities ?? getCapabilities(scopeProfile),
+        ...(raw.lastSyncAt ? { lastSyncAt: raw.lastSyncAt } : {}),
+        ...(raw.lastCalendarSyncAt ? { lastCalendarSyncAt: raw.lastCalendarSyncAt } : {}),
+        ...(raw.lastMailSyncAt ? { lastMailSyncAt: raw.lastMailSyncAt } : {}),
+        ...(raw.mailHistoryComplete ? { mailHistoryComplete: raw.mailHistoryComplete } : {}),
+        ...(raw.mailIdentityDigest ? { mailIdentityDigest: raw.mailIdentityDigest } : {}),
+        ...(raw.mailSyncProgress ? { mailSyncProgress: raw.mailSyncProgress } : {}),
+      },
+      accountLabel: row.account_label,
+      status: row.status,
+      scopes: parseJson<string[]>(row.scopes_json),
+    };
   }
 
   async statuses(): Promise<ConnectorStatus[]> {
@@ -458,7 +495,8 @@ export class ConnectorService {
               : 'configured',
         accountEmail: config?.status === 'connected' ? config.accountLabel : null,
         scopes: config?.scopes ?? [],
-        relationshipSync: config?.publicConfig.relationshipSync ?? false,
+        scopeProfile: config?.publicConfig.scopeProfile ?? 'minimum',
+        capabilities: config?.publicConfig.capabilities ?? getCapabilities('minimum'),
         lastSyncAt:
           config?.publicConfig.lastMailSyncAt ??
           config?.publicConfig.lastCalendarSyncAt ??
@@ -474,13 +512,10 @@ export class ConnectorService {
     provider: ConnectorProvider;
     clientId: string;
     tenantId?: string;
-    relationshipSync: boolean;
+    scopeProfile: ScopeProfile;
   }): Promise<ConnectorStatus> {
     const now = this.#now().toISOString();
-    const scopes = getScopes(
-      input.provider,
-      input.relationshipSync ? 'relationship-sync' : 'minimum',
-    );
+    const scopes = getScopes(input.provider, input.scopeProfile);
     this.#vault.repository.upsertConnectorConfig({
       id: connectorId(input.provider),
       provider: input.provider,
@@ -488,7 +523,8 @@ export class ConnectorService {
       publicConfig: {
         clientId: input.clientId.trim(),
         ...(input.provider === 'microsoft' ? { tenantId: input.tenantId?.trim() || 'common' } : {}),
-        relationshipSync: input.relationshipSync,
+        scopeProfile: input.scopeProfile,
+        capabilities: getCapabilities(input.scopeProfile),
       },
       secretRef: `secure-store://oauth/${input.provider}/tokens`,
       scopes,
@@ -513,7 +549,7 @@ export class ConnectorService {
         provider,
         config.publicConfig.clientId,
         config.publicConfig.tenantId,
-        config.publicConfig.relationshipSync,
+        config.publicConfig.scopeProfile,
         this.#openExternal,
         this.#authorizeForTest,
       );
@@ -589,8 +625,10 @@ export class ConnectorService {
     if (normalizeEmail(accountEmail) !== normalizeEmail(config.accountLabel)) {
       throw new Error(`Account ${accountEmail} does not match connected account for ${provider}`);
     }
-    if (!this.#relationshipReadScopePresent(provider, config)) {
-      throw new Error(`Relationship sync read scope is not enabled for ${provider}`);
+    if (!this.#canReadInbox(provider, config)) {
+      throw new Error(
+        `Inbox reading is not enabled for ${provider}; reconnect with read-only or relationship sync access`,
+      );
     }
     return this.#calendarConnector(provider);
   }
@@ -617,15 +655,41 @@ export class ConnectorService {
       .digest('hex');
   }
 
-  #relationshipReadScopePresent(
+  #inboxReadScope(provider: ConnectorProvider): string {
+    return provider === 'google'
+      ? 'https://www.googleapis.com/auth/gmail.readonly'
+      : 'Mail.ReadBasic';
+  }
+
+  #grantedInboxRead(provider: ConnectorProvider, config: { scopes: string[] }): boolean {
+    return config.scopes.includes(this.#inboxReadScope(provider));
+  }
+
+  #canReadInbox(provider: ConnectorProvider, config: { publicConfig: PublicConfig; scopes: string[] }): boolean {
+    const profile = config.publicConfig.scopeProfile;
+    return (
+      (profile === 'read-only' || profile === 'relationship-sync') &&
+      this.#grantedInboxRead(provider, config)
+    );
+  }
+
+  #canSyncRelationships(
     provider: ConnectorProvider,
     config: { publicConfig: PublicConfig; scopes: string[] },
   ): boolean {
-    if (!config.publicConfig.relationshipSync) return false;
-    const minimum = new Set(getScopes(provider, 'minimum'));
-    return getScopes(provider, 'relationship-sync')
-      .filter((scope) => !minimum.has(scope))
-      .every((scope) => config.scopes.includes(scope));
+    return config.publicConfig.scopeProfile === 'relationship-sync' && this.#grantedInboxRead(provider, config);
+  }
+
+  #canSend(provider: ConnectorProvider, config: { publicConfig: PublicConfig; scopes: string[] }): boolean {
+    return this.#canSyncRelationships(provider, config) && config.publicConfig.capabilities.canSend;
+  }
+
+  #canReadCalendar(config: { publicConfig: PublicConfig }): boolean {
+    return config.publicConfig.capabilities.canReadCalendar;
+  }
+
+  #canWriteCalendar(config: { publicConfig: PublicConfig }): boolean {
+    return config.publicConfig.capabilities.canWriteCalendar;
   }
 
   async #storeMailSyncProgress(
@@ -656,9 +720,9 @@ export class ConnectorService {
   async #reconcileMail(provider: ConnectorProvider): Promise<AppBootstrap> {
     const config = this.#config(provider);
     if (!config || config.status !== 'connected') throw new Error(`${provider} is not connected`);
-    if (!this.#relationshipReadScopePresent(provider, config)) {
+    if (!this.#canSyncRelationships(provider, config)) {
       throw new Error(
-        'Complete mailbox reconciliation requires the relationship-sync read scope. Reconnect with relationship sync enabled.',
+        'Complete mailbox reconciliation requires the relationship-sync profile. Reconnect with relationship sync enabled.',
       );
     }
 
@@ -754,6 +818,11 @@ export class ConnectorService {
   async syncCalendar(provider: ConnectorProvider): Promise<AppBootstrap> {
     const config = this.#config(provider);
     if (!config || config.status !== 'connected') throw new Error(`${provider} is not connected`);
+    if (!this.#canReadCalendar(config)) {
+      throw new Error(
+        `${provider} is connected with ${config.publicConfig.scopeProfile} access, which does not include calendar reading. Reconnect with the minimum or relationship-sync profile.`,
+      );
+    }
     const connector = this.#calendarConnector(provider);
     const start = new Date(this.#now());
     start.setUTCDate(start.getUTCDate() - 30);
@@ -817,6 +886,14 @@ export class ConnectorService {
 
   async createMeeting(input: Omit<MeetingItem, 'id'>): Promise<MeetingItem> {
     if (input.provider === 'manual') return this.#vault.createMeeting(input);
+    const config = this.#config(input.provider);
+    if (!config || config.status !== 'connected')
+      throw new Error(`${input.provider} is not connected`);
+    if (!this.#canWriteCalendar(config)) {
+      throw new Error(
+        `${input.provider} is connected with ${config.publicConfig.scopeProfile} access, which cannot create calendar events. Reconnect with the minimum or relationship-sync profile.`,
+      );
+    }
     const connector = this.#calendarConnector(input.provider);
     const event = await connector.createEvent({
       title: input.title,
@@ -954,6 +1031,14 @@ export class ConnectorService {
 
     const config = this.#config(provider);
     if (!config || config.status !== 'connected') throw new Error(`${provider} is not connected`);
+    // Read-only connections cannot draft/send until separately reauthorized
+    // with a send-capable profile. This fails before any reconciliation,
+    // durable reservation, or provider send endpoint.
+    if (!this.#canSend(provider, config)) {
+      throw new Error(
+        `${provider} is connected with ${config.publicConfig.scopeProfile} access, which cannot send. Reconnect with relationship sync enabled to reauthorize sending.`,
+      );
+    }
     // Sending is fail-closed on a complete, current mailbox reconciliation.
     // This runs before a durable reservation or any provider send endpoint.
     const reconciled = await this.#reconcileMail(provider);

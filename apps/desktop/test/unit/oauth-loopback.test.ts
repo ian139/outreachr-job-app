@@ -48,7 +48,7 @@ describe('OAuth loopback callback lifecycle', () => {
       'google',
       'founder-owned-client',
       undefined,
-      false,
+      'minimum',
       async (authorizationUrl) => {
         const authorization = new URL(authorizationUrl);
         const redirect = new URL(authorization.searchParams.get('redirect_uri')!);
@@ -101,7 +101,7 @@ describe('OAuth loopback callback lifecycle', () => {
         'google',
         'founder-owned-client',
         undefined,
-        false,
+        'minimum',
         async () => {
           throw new Error('browser unavailable');
         },
@@ -120,7 +120,7 @@ describe('OAuth loopback callback lifecycle', () => {
       'microsoft',
       'founder-owned-microsoft-client',
       'common',
-      false,
+      'minimum',
       async (authorizationUrl) => {
         const authorization = new URL(authorizationUrl);
         const redirect = new URL(authorization.searchParams.get('redirect_uri')!);

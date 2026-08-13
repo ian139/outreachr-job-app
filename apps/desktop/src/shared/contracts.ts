@@ -44,6 +44,24 @@ export type PipelineStage =
 export type Confidence = 'verified' | 'supported' | 'inferred' | 'unknown' | 'stale';
 export type ConnectorProvider = 'google' | 'microsoft';
 export type AgentProvider = 'codex' | 'claude';
+
+/**
+ * Provider-neutral connector access profile. `read-only` grants inbox reading
+ * only (Google: openid, userinfo.email, gmail.readonly) and is never
+ * send-ready; `relationship-sync` additionally grants inbox reads on top of
+ * the send-capable `minimum` profile.
+ */
+export type ScopeProfile = 'read-only' | 'minimum' | 'relationship-sync';
+
+/** Provider-neutral capability summary persisted and exposed with the profile. */
+export interface ConnectorCapabilities {
+  canReadInbox: boolean;
+  canSyncRelationships: boolean;
+  canDraft: boolean;
+  canSend: boolean;
+  canReadCalendar: boolean;
+  canWriteCalendar: boolean;
+}
 export interface WorkspaceProfile {
   id: string;
   displayName: string;
@@ -450,7 +468,9 @@ export interface ConnectorStatus {
   state: 'not_configured' | 'configured' | 'connecting' | 'connected' | 'error';
   accountEmail: string | null;
   scopes: string[];
-  relationshipSync: boolean;
+  /** Explicitly selected profile; never derived from the granted scope list. */
+  scopeProfile: ScopeProfile;
+  capabilities: ConnectorCapabilities;
   lastSyncAt: string | null;
   error: string | null;
   encryptionAvailable: boolean;
@@ -714,7 +734,7 @@ export interface CommandMap {
     provider: ConnectorProvider;
     clientId: string;
     tenantId?: string;
-    relationshipSync: boolean;
+    scopeProfile: ScopeProfile;
   };
   'connector.connect': { provider: ConnectorProvider };
   'connector.disconnect': { provider: ConnectorProvider };

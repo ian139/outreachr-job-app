@@ -13,13 +13,23 @@ import {
   temporaryDirectory,
 } from '../helpers/vault';
 
+const MINIMUM_CAPABILITIES = {
+  canReadInbox: false,
+  canSyncRelationships: false,
+  canDraft: true,
+  canSend: true,
+  canReadCalendar: true,
+  canWriteCalendar: true,
+};
+
 const CONNECTORS: ConnectorStatus[] = [
   {
     provider: 'google',
     state: 'not_configured',
     accountEmail: null,
     scopes: [],
-    relationshipSync: false,
+    scopeProfile: 'minimum',
+    capabilities: MINIMUM_CAPABILITIES,
     lastSyncAt: null,
     error: null,
     encryptionAvailable: true,
@@ -29,7 +39,8 @@ const CONNECTORS: ConnectorStatus[] = [
     state: 'not_configured',
     accountEmail: null,
     scopes: [],
-    relationshipSync: false,
+    scopeProfile: 'minimum',
+    capabilities: MINIMUM_CAPABILITIES,
     lastSyncAt: null,
     error: null,
     encryptionAvailable: true,

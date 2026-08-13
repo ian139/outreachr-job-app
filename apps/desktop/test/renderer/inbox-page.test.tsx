@@ -109,8 +109,23 @@ function setupInboxFixture() {
       provider: 'google',
       state: 'connected',
       accountEmail: 'founder@example.com',
-      scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
-      relationshipSync: true,
+      scopes: [
+        'openid',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/calendar.events.owned',
+        'https://www.googleapis.com/auth/calendar.events.freebusy',
+        'https://www.googleapis.com/auth/gmail.readonly',
+      ],
+      scopeProfile: 'relationship-sync',
+      capabilities: {
+        canReadInbox: true,
+        canSyncRelationships: true,
+        canDraft: true,
+        canSend: true,
+        canReadCalendar: true,
+        canWriteCalendar: true,
+      },
       lastSyncAt: new Date().toISOString(),
       error: null,
       encryptionAvailable: true,
@@ -196,6 +211,53 @@ describe('InboxPage component & messaging behavior', () => {
     );
   });
 
+  it('lists inbox threads for a read-only connected account', async () => {
+    const fixture = bootstrapFixture();
+    fixture.connectors = [
+      {
+        provider: 'google',
+        state: 'connected',
+        accountEmail: 'founder@example.com',
+        scopes: [
+          'openid',
+          'https://www.googleapis.com/auth/userinfo.email',
+          'https://www.googleapis.com/auth/gmail.readonly',
+        ],
+        scopeProfile: 'read-only',
+        capabilities: {
+          canReadInbox: true,
+          canSyncRelationships: false,
+          canDraft: false,
+          canSend: false,
+          canReadCalendar: false,
+          canWriteCalendar: false,
+        },
+        lastSyncAt: null,
+        error: null,
+        encryptionAvailable: true,
+      },
+    ];
+    const listMailThreads = vi.fn(
+      async (): Promise<MailThreadListPage> => ({
+        threads: [mockThreadSummary1],
+        nextCursor: null,
+      }),
+    );
+    const bridge = installBridge(fixture);
+    bridge.listMailThreads = listMailThreads;
+    bridge.cancelMailRequest = vi.fn(async () => {});
+
+    renderInboxPage();
+
+    expect(await screen.findByText('Job Application Followup')).toBeInTheDocument();
+    expect(listMailThreads).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'google',
+        accountEmail: 'founder@example.com',
+      }),
+    );
+  });
+
   it('selects a thread, loads messages, and handles detail cursor pagination', async () => {
     const { getMailThread, cancelMailRequest } = setupInboxFixture();
     renderInboxPage();
@@ -268,8 +330,20 @@ describe('InboxPage component & messaging behavior', () => {
         provider: 'google',
         state: 'connected',
         accountEmail: 'founder@example.com',
-        scopes: [],
-        relationshipSync: true,
+        scopes: [
+          'openid',
+          'https://www.googleapis.com/auth/userinfo.email',
+          'https://www.googleapis.com/auth/gmail.readonly',
+        ],
+        scopeProfile: 'read-only',
+        capabilities: {
+          canReadInbox: true,
+          canSyncRelationships: false,
+          canDraft: false,
+          canSend: false,
+          canReadCalendar: false,
+          canWriteCalendar: false,
+        },
         lastSyncAt: null,
         error: null,
         encryptionAvailable: true,

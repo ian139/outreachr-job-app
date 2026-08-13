@@ -19,7 +19,12 @@ import {
   Upload,
 } from 'lucide-react';
 import { useLocation, useNavigate } from '../lib/router';
-import type { AgentProvider, ConnectorProvider, SuppressionItem } from '../../../shared/contracts';
+import type {
+  AgentProvider,
+  ConnectorProvider,
+  ScopeProfile,
+  SuppressionItem,
+} from '../../../shared/contracts';
 import {
   Badge,
   Button,
@@ -89,17 +94,49 @@ function ExternalLinkButton({
   );
 }
 
+const SCOPE_PROFILE_LABEL: Record<ScopeProfile, string> = {
+  'read-only': 'Read-only',
+  minimum: 'Standard',
+  'relationship-sync': 'Relationship sync',
+};
+
+const SCOPE_PROFILE_OPTIONS: Array<{
+  value: ScopeProfile;
+  title: string;
+  description: string;
+}> = [
+  {
+    value: 'read-only',
+    title: 'Read-only',
+    description:
+      'Reads your inbox and job-application conversations. Never drafts, sends, or touches your calendar until you reconnect with more access.',
+  },
+  {
+    value: 'minimum',
+    title: 'Standard',
+    description:
+      'Sends founder-approved messages and reads or creates calendar events. Does not read your inbox.',
+  },
+  {
+    value: 'relationship-sync',
+    title: 'Relationship sync',
+    description:
+      'Standard access plus full inbox reading for relationship history. Required before sending.',
+  },
+];
+
 function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JSX.Element {
   const { data, command, notify } = useWorkspace();
   const existing = data?.connectors.find((item) => item.provider === provider);
   const [clientId, setClientId] = useState('');
   const [tenantId, setTenantId] = useState('common');
-  const [relationshipSync, setRelationshipSync] = useState(false);
+  const [scopeProfile, setScopeProfile] = useState<ScopeProfile>('minimum');
+  const [reconnecting, setReconnecting] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setRelationshipSync(existing?.relationshipSync ?? false);
-  }, [existing?.relationshipSync]);
+    setScopeProfile(existing?.scopeProfile ?? 'minimum');
+  }, [existing?.scopeProfile]);
 
   const saveAndConnect = async (): Promise<void> => {
     setBusy(true);
@@ -108,9 +145,10 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
         provider,
         clientId,
         ...(provider === 'microsoft' ? { tenantId } : {}),
-        relationshipSync,
+        scopeProfile,
       });
       await command('connector.connect', { provider });
+      setReconnecting(false);
       notify({
         tone: 'success',
         title: `${titleCase(provider)} connected`,
@@ -190,7 +228,8 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
     </div>
   ) : null;
 
-  if (existing?.state === 'connected') {
+  if (existing?.state === 'connected' && !reconnecting) {
+    const capabilities = existing.capabilities;
     return (
       <div className="connector-connected-shell">
         {diagnostic}
@@ -198,24 +237,42 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
           <div>
             <StateDot tone={existing.error ? 'warning' : 'success'} label="Connected" />
             <strong>{existing.accountEmail}</strong>
+            <Badge tone="neutral">{SCOPE_PROFILE_LABEL[existing.scopeProfile]}</Badge>
             <small>{existing.scopes.join(' · ')}</small>
             <small>
-              {existing.relationshipSync
-                ? 'Relationship sync enabled.'
-                : 'Relationship sync is off. Reconnect with it enabled before sending.'}
+              {existing.scopeProfile === 'read-only'
+                ? 'Read-only access: inbox reading only. Drafting, sending, and calendar access are unavailable until you reconnect with a send-capable profile.'
+                : existing.scopeProfile === 'relationship-sync'
+                  ? 'Relationship sync enabled: reads inbox and is ready to send approved messages.'
+                  : 'Standard access: sending and calendar enabled. Inbox reading is off; reconnect with read-only or relationship sync to read mail.'}
+            </small>
+            <small>
+              {[
+                capabilities.canReadInbox ? 'Reads inbox' : null,
+                capabilities.canSyncRelationships ? 'Relationship sync' : null,
+                capabilities.canDraft && capabilities.canSend ? 'Draft and send' : null,
+                capabilities.canWriteCalendar ? 'Calendar events' : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </small>
           </div>
           <div>
-            {existing.relationshipSync ? (
+            {capabilities.canSyncRelationships ? (
               <Button loading={busy} onClick={() => void syncMail()}>
                 Sync mail history
               </Button>
             ) : null}
-            <Button loading={busy} onClick={() => void syncCalendar()}>
-              Sync calendar
-            </Button>
+            {capabilities.canReadCalendar ? (
+              <Button loading={busy} onClick={() => void syncCalendar()}>
+                Sync calendar
+              </Button>
+            ) : null}
             <Button loading={busy} onClick={() => void testConnection()}>
               Test connection
+            </Button>
+            <Button loading={busy} onClick={() => setReconnecting(true)}>
+              Reconnect to change access
             </Button>
             <Button tone="danger" loading={busy} onClick={() => void disconnect()}>
               Disconnect
@@ -283,10 +340,11 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
                     test-only client may require reconnecting.
                   </p>
                   <p>
-                    Minimum: <code>openid</code>, <code>userinfo.email</code>,{' '}
+                    Read-only: <code>openid</code>, <code>userinfo.email</code>, and{' '}
+                    <code>gmail.readonly</code> — no sending or calendar access. Standard adds{' '}
                     <code>gmail.send</code>, <code>calendar.events.owned</code>, and{' '}
-                    <code>calendar.events.freebusy</code>. Relationship sync adds{' '}
-                    <code>gmail.readonly</code>.
+                    <code>calendar.events.freebusy</code>. Relationship sync keeps standard access
+                    and reads your inbox for relationship history; it is required before sending.
                   </p>
                   <ExternalLinkButton href={officialLinks.googleConsent}>
                     Auth overview
@@ -356,9 +414,10 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
                 <div>
                   <strong>Add delegated Graph permissions</strong>
                   <p>
-                    Add User.Read, Mail.Send, Calendars.ReadWrite, and offline_access. Relationship
-                    sync adds Mail.ReadBasic; it excludes bodies and attachments and is required
-                    before sending.
+                    Read-only uses User.Read and Mail.ReadBasic. Standard adds Mail.Send,
+                    Calendars.ReadWrite, and offline_access. Relationship sync keeps standard
+                    access plus Mail.ReadBasic for relationship history; it is required before
+                    sending.
                   </p>
                   <ExternalLinkButton href={officialLinks.microsoftPermissions}>
                     Graph permission reference
@@ -398,29 +457,46 @@ function ConnectorSetup({ provider }: { provider: ConnectorProvider }): React.JS
             spellCheck={false}
           />
         ) : null}
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={relationshipSync}
-            onChange={(event) => setRelationshipSync(event.target.checked)}
-          />
-          <span>
-            <strong>Enable relationship sync</strong>
+        <fieldset className="check-row-stack">
+          <legend>
+            <strong>Access profile</strong>
             <small>
-              Research-only use can leave this off; sending requires it. Outreachr retains headers
-              for known relationships plus unmatched outbound headers for later contact matching,
-              and discards unrelated inbound mail, every body, and every attachment.
+              Read-only research use never receives sending or calendar-write scopes. Choose
+              relationship sync only when you are ready to send; the provider consent screen shows
+              the exact scopes before you approve.
             </small>
-          </span>
-        </label>
-        <Button
-          tone="primary"
-          loading={busy}
-          disabled={!clientId.trim() || !existing?.encryptionAvailable}
-          onClick={() => void saveAndConnect()}
-        >
-          Save and connect in browser
-        </Button>
+          </legend>
+          {SCOPE_PROFILE_OPTIONS.map((option) => (
+            <label className="check-row" key={option.value}>
+              <input
+                type="radio"
+                name={`scope-profile-${provider}`}
+                value={option.value}
+                checked={scopeProfile === option.value}
+                onChange={() => setScopeProfile(option.value)}
+              />
+              <span>
+                <strong>{option.title}</strong>
+                <small>{option.description}</small>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <div className="credential-form-actions">
+          <Button
+            tone="primary"
+            loading={busy}
+            disabled={!clientId.trim() || !existing?.encryptionAvailable}
+            onClick={() => void saveAndConnect()}
+          >
+            {reconnecting ? 'Reconnect with selected access' : 'Save and connect in browser'}
+          </Button>
+          {reconnecting ? (
+            <Button loading={busy} onClick={() => setReconnecting(false)}>
+              Cancel
+            </Button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
