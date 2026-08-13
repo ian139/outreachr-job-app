@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { getResponse, HttpResponse, http, type RequestHandler } from 'msw';
-import { GoogleNetworkAuditor, startGoogleNetworkAudit } from './support/google-network-audit';
+import { GoogleNetworkAuditor, startGoogleNetworkAudit } from '../src/main/google-network-audit';
 
 export interface GoogleProviderMockState {
   readonly baseUrl: string;

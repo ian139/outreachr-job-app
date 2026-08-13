@@ -29,7 +29,7 @@ import {
 import type { AppBootstrap, ConnectorStatus, DraftMessage, MeetingItem } from '../shared/contracts';
 import type { SecureStore } from './secure-store';
 import type { VaultService } from './vault-service';
-import { createAuditedFetch } from '../../e2e/support/google-network-audit';
+import { createAuditedFetch } from './google-network-audit';
 
 const MAX_CALENDAR_SYNC_PAGES = 10_000;
 const OAUTH_CALLBACK_TIMEOUT_MS = 5 * 60 * 1_000;

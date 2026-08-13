@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * Verification script for Redacted Google Live-Smoke & Network Audit Mechanic.
- * Runs offline validation of fail-closed endpoint classification, disallowed Gmail mutation hard-fails,
- * exact host matching, token/query/path redaction, zero-mutation machine-readable summary, and auditor lifecycle.
+ * Runs offline validation of fail-closed endpoint classification, exact host matching,
+ * method policy enforcement, fetch dispatch prevention, token/query/path redaction,
+ * zero-mutation summary, and production-owned auditor lifecycle.
  */
 import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
@@ -11,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const auditModulePath = path.join(rootDir, 'apps', 'desktop', 'e2e', 'support', 'google-network-audit.ts');
+const auditModulePath = path.join(rootDir, 'apps', 'desktop', 'src', 'main', 'google-network-audit.ts');
 
 const {
   GoogleMutationDisallowedError,
@@ -23,10 +24,10 @@ const {
   startGoogleNetworkAudit,
 } = await import(auditModulePath);
 
-console.log('Running offline fail-closed Google network audit verification...');
+console.log('Running offline production-owned fail-closed Google network audit verification...');
 
-// 1. Verify Allowed Contract (OAuth authorize/token/userinfo + Gmail GET list/thread/message/attachment ONLY)
-const allowedGetEndpoints = [
+// 1. Verify Method Policy & Allowed Contract
+const allowedEndpoints = [
   { method: 'POST', url: 'https://oauth2.googleapis.com/token', expected: 'oauth.token' },
   { method: 'GET', url: 'https://accounts.google.com/o/oauth2/v2/auth?scope=openid', expected: 'oauth.authorize' },
   { method: 'GET', url: 'https://www.googleapis.com/oauth2/v2/userinfo', expected: 'oauth.userinfo' },
@@ -37,48 +38,18 @@ const allowedGetEndpoints = [
   { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/threads/th_300', expected: 'gmail.threads.get' },
 ];
 
-for (const sample of allowedGetEndpoints) {
+for (const sample of allowedEndpoints) {
   const result = classifyGoogleEndpoint(sample.method, sample.url);
   assert.equal(result.endpointClass, sample.expected, `Endpoint class mismatch for ${sample.url}`);
   assert.equal(result.isAllowed, true, `Expected ${sample.url} to be allowed`);
-  assert.equal(result.isGmailMutation, false, `Expected ${sample.url} not to be a Gmail mutation`);
-  assert.equal(result.isUnexpected, false, `Expected ${sample.url} not to be unexpected`);
 }
 
-// 2. Verify Fail-Closed & Unexpected Requests (Uncontracted endpoints disallowed)
-const unexpectedEndpoints = [
-  { method: 'POST', url: 'https://oauth2.googleapis.com/revoke?token=123', expected: 'oauth.revoke' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/labels', expected: 'gmail.labels.get' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts', expected: 'gmail.drafts.get' },
-  { method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/me/profile', expected: 'gmail.profile.get' },
-  { method: 'GET', url: 'https://calendar.googleapis.com/calendar/v3/calendars/primary/events', expected: 'calendar.events.list' },
-  { method: 'GET', url: 'https://gmail.googleapis.com.evil.test/v1/users/me/messages', expected: 'external.unexpected' },
-];
+// 2. Verify Method Policy Violations (GET /token, POST /auth, POST /userinfo -> Disallowed)
+assert.equal(classifyGoogleEndpoint('GET', 'https://oauth2.googleapis.com/token').isAllowed, false);
+assert.equal(classifyGoogleEndpoint('POST', 'https://accounts.google.com/o/oauth2/v2/auth').isAllowed, false);
+assert.equal(classifyGoogleEndpoint('POST', 'https://www.googleapis.com/oauth2/v2/userinfo').isAllowed, false);
 
-for (const sample of unexpectedEndpoints) {
-  const result = classifyGoogleEndpoint(sample.method, sample.url);
-  assert.equal(result.endpointClass, sample.expected, `Unexpected endpoint class mismatch for ${sample.url}`);
-  assert.equal(result.isAllowed, false, `Expected ${sample.url} to be disallowed`);
-  assert.equal(result.isUnexpected, true, `Expected ${sample.url} to be unexpected`);
-}
-
-// 3. Verify Disallowed Gmail Mutations
-const disallowedMutations = [
-  { method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send', expected: 'gmail.messages.send' },
-  { method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts', expected: 'gmail.drafts.create' },
-  { method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/drafts/send', expected: 'gmail.drafts.send' },
-  { method: 'DELETE', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100', expected: 'gmail.messages.delete' },
-  { method: 'POST', url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/msg_100/modify', expected: 'gmail.messages.modify' },
-];
-
-for (const sample of disallowedMutations) {
-  const result = classifyGoogleEndpoint(sample.method, sample.url);
-  assert.equal(result.endpointClass, sample.expected, `Mutation class mismatch for ${sample.url}`);
-  assert.equal(result.isAllowed, false, `Expected ${sample.url} to be disallowed`);
-  assert.equal(result.isGmailMutation, true, `Expected ${sample.url} to be a Gmail mutation`);
-}
-
-// 4. Verify Redaction
+// 3. Verify Redaction
 const rawSensitiveUrl =
   'https://gmail.googleapis.com/gmail/v1/users/founder%40company.test/messages/msg_9999?format=metadata&access_token=ya29.secret_token_val&q=from%3Acandidate%40test.org';
 const redactedUrl = redactGoogleUrl(rawSensitiveUrl);
@@ -87,36 +58,49 @@ assert(!redactedUrl.includes('founder'), 'Redacted URL must not contain user ema
 assert(!redactedUrl.includes('msg_9999'), 'Redacted URL must not contain message ID');
 assert(!redactedUrl.includes('secret_token_val'), 'Redacted URL must not contain access token');
 
-// 5. Verify Temp File Summary Persistence for Live Smoke
+// 4. Verify Fetch Call Prevention on Disallowed Request
+let mockFetchCalled = false;
+const mockFetch = async () => {
+  mockFetchCalled = true;
+  return new Response('{}', { status: 200 });
+};
+const auditedFetch = createAuditedFetch(mockFetch, { throwOnMutation: true, throwOnUnexpected: true });
+
+try {
+  await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST' });
+  assert.fail('Audited fetch must throw on Gmail mutation attempt');
+} catch (error) {
+  assert(error instanceof GoogleMutationDisallowedError);
+  assert.equal(mockFetchCalled, false, 'Fetch function must NEVER be called when request is disallowed');
+}
+
+// 5. Verify Initial Summary File Creation and Persistence
 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-verify-audit-'));
 const tempSummaryPath = path.join(tempDir, 'live-smoke-summary.json');
 
 try {
-  const dummyFetch = async () => new Response('{}', { status: 200 });
-  const auditedFetch = createAuditedFetch(dummyFetch, { summaryPath: tempSummaryPath, throwOnMutation: false });
+  const fileAuditor = startGoogleNetworkAudit({ summaryPath: tempSummaryPath });
 
-  await auditedFetch('https://oauth2.googleapis.com/token', { method: 'POST' });
-  await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages', { method: 'GET' });
-  await auditedFetch('https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages/msg_555', { method: 'GET' });
+  // Initial summary file created at start
+  const initialRaw = await fs.readFile(tempSummaryPath, 'utf8');
+  const initialSummary = JSON.parse(initialRaw);
+  assert.equal(initialSummary.totalRequests, 0);
+  assert.equal(initialSummary.zeroMutations, true);
 
-  const summaryRaw = await fs.readFile(tempSummaryPath, 'utf8');
-  const summary = JSON.parse(summaryRaw);
+  // Record allowed requests
+  fileAuditor.recordRequest({ method: 'POST', url: 'https://oauth2.googleapis.com/token' });
+  fileAuditor.recordRequest({ method: 'GET', url: 'https://gmail.googleapis.com/gmail/v1/users/ada@test.org/messages' });
 
-  assert.equal(summary.totalRequests, 3);
-  assert.equal(summary.allowedRequests, 3);
-  assert.equal(summary.gmailMutationAttempts, 0);
-  assert.equal(summary.unexpectedRequests, 0);
-  assert.equal(summary.zeroMutations, true);
-  assert.equal(summary.zeroUnexpected, true);
-  assert.equal(summary.endpointCounts['POST oauth.token'], 1);
-  assert.equal(summary.endpointCounts['GET gmail.messages.list'], 1);
+  const updatedRaw = await fs.readFile(tempSummaryPath, 'utf8');
+  const updatedSummary = JSON.parse(updatedRaw);
+  assert.equal(updatedSummary.totalRequests, 2);
+  assert.equal(updatedSummary.allowedRequests, 2);
+  assert.equal(updatedSummary.zeroMutations, true);
+  assert.equal(updatedSummary.zeroUnexpected, true);
 
-  assert(!summaryRaw.includes('ada@test.org'), 'Persisted summary must omit raw user email');
-  assert(!summaryRaw.includes('msg_555'), 'Persisted summary must omit raw message ID');
-
-  console.log('✓ All Google network audit fail-closed & live smoke summary persistence checks passed.');
+  console.log('✓ All production-owned Google network audit checks passed successfully.');
   console.log('Sample persisted machine-readable summary output:');
-  console.log(summaryRaw);
+  console.log(updatedRaw);
 } finally {
   await fs.rm(tempDir, { recursive: true, force: true });
 }

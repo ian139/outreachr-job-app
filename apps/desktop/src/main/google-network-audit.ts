@@ -1,16 +1,22 @@
-import { fsyncSync, openSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, openSync, writeFileSync } from 'node:fs';
 
 /**
- * Redacted Google Live-Smoke & Network Audit Mechanic
+ * Redacted Google Live-Smoke & Network Audit Mechanic (Fail-Closed)
  *
- * Enforces a fail-closed read-only acceptance policy for Google network traffic:
- * 1. Allowed contract: ONLY OAuth authorize/token/userinfo plus Gmail GET list/thread/message/attachment.
- * 2. Records ONLY HTTP method, canonical endpoint class, and allowed/disallowed status and counts.
- * 3. Exact host matching: rejects non-explicit Google domains or spoofed subdomains.
- * 4. Categorizes disallowed traffic into Gmail mutation attempts (POST/PUT/PATCH/DELETE) and unexpected requests.
- * 5. Never persists or logs tokens, URLs containing identifiers (message IDs, thread IDs, user IDs),
- *    query parameters, email addresses, subjects, correspondents, or request/response bodies.
- * 6. Exposes lifecycle methods and file-persisted fetch wrapping for live Electron smoke auditing.
+ * Main process production-owned acceptance module that:
+ * 1. Enforces a strict fail-closed contract allowing ONLY:
+ *    - OAuth token (POST only)
+ *    - OAuth authorize (GET only)
+ *    - OAuth userinfo (GET only)
+ *    - Gmail GET list, message get, attachment get, thread list, thread get
+ * 2. Records ONLY HTTP method, canonical endpoint class, and status/counts.
+ * 3. Enforces exact host matching against explicit Google domains and loopback test hosts.
+ * 4. Categorizes disallowed traffic into Gmail mutation attempts (POST/PUT/PATCH/DELETE)
+ *    and unexpected endpoint requests.
+ * 5. Never persists or logs tokens, URLs containing identifiers, query parameters,
+ *    email addresses, subjects, correspondents, or request/response bodies.
+ * 6. Safely handles summary persistence (closing file descriptors in finally blocks and failing closed on write errors).
+ * 7. Blocks fetch invocation prior to network dispatch if a request is disallowed.
  */
 
 export class GoogleMutationDisallowedError extends Error {
@@ -82,7 +88,7 @@ export interface GoogleAuditSummary {
 export interface GoogleNetworkAuditOptions {
   /** Hard-fail immediately when a Gmail mutation request (POST/PUT/PATCH/DELETE) is intercepted. Default: true */
   throwOnMutation?: boolean;
-  /** Hard-fail immediately when an unexpected request (exceeding fixed contract) is intercepted. Default: false */
+  /** Hard-fail immediately when an unexpected request (exceeding fixed contract) is intercepted. Default: true */
   throwOnUnexpected?: boolean;
   /** File path to write machine-readable redacted summary JSON on every audited request */
   summaryPath?: string;
@@ -106,7 +112,9 @@ function isAllowedHost(hostname: string): boolean {
 /**
  * Classifies an HTTP method + Google endpoint URL into a canonical endpoint class.
  * Enforces a strict, fail-closed contract allowing ONLY:
- * - OAuth token, authorize, userinfo
+ * - OAuth token (POST only)
+ * - OAuth authorize (GET only)
+ * - OAuth userinfo (GET only)
  * - Gmail GET list/thread/message/attachment
  */
 export function classifyGoogleEndpoint(methodInput: string, rawUrlInput: string | URL): EndpointClassification {
@@ -133,23 +141,33 @@ export function classifyGoogleEndpoint(methodInput: string, rawUrlInput: string 
     };
   }
 
-  // 1. OAuth Endpoints (Contract: token, authorize, userinfo ONLY)
+  // 1. OAuth Endpoints (Contract: token [POST only], authorize [GET only], userinfo [GET only])
   if (
     hostname === 'oauth2.googleapis.com' ||
     hostname === 'accounts.google.com' ||
     hostname === 'openidconnect.googleapis.com' ||
     pathname.endsWith('/token') ||
     pathname.endsWith('/oauth2/v2/auth') ||
-    pathname.includes('/userinfo')
+    pathname.includes('/userinfo') ||
+    pathname.includes('/revoke')
   ) {
     if (pathname.endsWith('/token') || pathname.includes('/oauth2/v4/token')) {
-      return { endpointClass: 'oauth.token', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+      if (method === 'POST') {
+        return { endpointClass: 'oauth.token', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+      }
+      return { endpointClass: 'oauth.token.unexpected_method', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-    if (pathname.includes('/auth') && method === 'GET') {
-      return { endpointClass: 'oauth.authorize', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+    if (pathname.includes('/auth')) {
+      if (method === 'GET') {
+        return { endpointClass: 'oauth.authorize', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+      }
+      return { endpointClass: 'oauth.authorize.unexpected_method', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
-    if (pathname.includes('/userinfo') && method === 'GET') {
-      return { endpointClass: 'oauth.userinfo', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+    if (pathname.includes('/userinfo')) {
+      if (method === 'GET') {
+        return { endpointClass: 'oauth.userinfo', isAllowed: true, isGmailMutation: false, isUnexpected: false };
+      }
+      return { endpointClass: 'oauth.userinfo.unexpected_method', isAllowed: false, isGmailMutation: false, isUnexpected: true };
     }
     if (pathname.includes('/revoke')) {
       return { endpointClass: 'oauth.revoke', isAllowed: false, isGmailMutation: false, isUnexpected: true };
@@ -289,7 +307,7 @@ export class GoogleNetworkAuditor {
 
   constructor(options?: GoogleNetworkAuditOptions) {
     this.throwOnMutation = options?.throwOnMutation ?? true;
-    this.throwOnUnexpected = options?.throwOnUnexpected ?? false;
+    this.throwOnUnexpected = options?.throwOnUnexpected ?? true;
     this.summaryPath = options?.summaryPath;
     this.start();
   }
@@ -298,6 +316,9 @@ export class GoogleNetworkAuditor {
   start(): void {
     this.active = true;
     this.reset();
+    if (this.summaryPath) {
+      this.persistSummary();
+    }
   }
 
   /** Stop auditing */
@@ -318,7 +339,7 @@ export class GoogleNetworkAuditor {
   /**
    * Intercept and record an HTTP request.
    * Redacts all sensitive parameters, classifies endpoint, updates counts,
-   * writes summary file if configured, and optionally throws on disallowed mutations/unexpected requests.
+   * writes summary file if configured, and throws on disallowed mutations/unexpected requests if enabled.
    */
   recordRequest(input: AuditRequestInput): AuditRecordResult {
     const method = (input.method || 'GET').toUpperCase();
@@ -397,21 +418,18 @@ export class GoogleNetworkAuditor {
 
   /**
    * Writes the machine-readable summary JSON to summaryPath if specified.
+   * Uses try...finally to guarantee file descriptor closure (no leaks) and fails closed on write errors.
    */
   private persistSummary(): void {
     if (!this.summaryPath) return;
+    const summary = this.getSummary();
+    const content = `${JSON.stringify(summary, null, 2)}\n`;
+    const fd = openSync(this.summaryPath, 'w');
     try {
-      const summary = this.getSummary();
-      const content = `${JSON.stringify(summary, null, 2)}\n`;
-      const fd = openSync(this.summaryPath, 'w');
-      try {
-        writeFileSync(fd, content, 'utf8');
-        fsyncSync(fd);
-      } finally {
-        // fd closed
-      }
-    } catch {
-      // Ignore file write errors in test environment if directory unavailable
+      writeFileSync(fd, content, 'utf8');
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
     }
   }
 
@@ -439,6 +457,7 @@ export class GoogleNetworkAuditor {
 
   /**
    * Reusable fetch wrapper for live-smoke or fetch patching.
+   * Audits request BEFORE invoking fetchFn. Disallowed requests throw and prevent network dispatch.
    */
   wrapFetch<T extends (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(fetchFn: T): T {
     const auditor = this;
@@ -473,6 +492,10 @@ export function createAuditedFetch<T extends (input: RequestInfo | URL, init?: R
   fetchFn: T,
   options?: GoogleNetworkAuditOptions,
 ): T {
-  const auditor = startGoogleNetworkAudit(options);
+  const auditor = startGoogleNetworkAudit({
+    throwOnMutation: true,
+    throwOnUnexpected: true,
+    ...options,
+  });
   return auditor.wrapFetch(fetchFn);
 }
