@@ -43,7 +43,11 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     );
 
     await page.getByRole('button', { name: 'View rich content' }).click();
-    await expect(messageDetail.getByRole('heading', { name: 'Senior Software Engineer Interview' })).toBeVisible();
+    await expect(
+      messageDetail.locator('.inbox-rich-content').getByRole('heading', {
+        name: 'Senior Software Engineer Interview',
+      }),
+    ).toBeVisible();
     await expect(messageDetail.getByRole('list')).toBeVisible();
     await expect(messageDetail.locator('blockquote')).toContainText('Please bring questions for the team.');
     await expect(messageDetail.locator('pre code')).toContainText('const interviewConfirmed = true;');
