@@ -38,6 +38,25 @@ OUTREACHR_LIVE_CLAUDE_SMOKE=1 pnpm smoke:claude
 
 The normal suite and CI never consume Claude plan credit. This opt-in harness uses an empty temporary workspace, no disclosed CRM context, no MCP connection, no built-in tools, one turn, and the same strict structured-output parser as the app. It requires official CLI subscription detection, removes both `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` from the Agent SDK environment, verifies an exact completion phrase with no proposals, prints no account identity, and deletes the workspace.
 
+## Packaged macOS smoke testing
+
+To verify packaged macOS distributions (DMG and ZIP) in temporary isolated environments:
+
+```bash
+pnpm smoke:packaged
+# Or specify explicit flags:
+node scripts/smoke-packaged-app.mjs --dmg --arch arm64 --release-dir apps/desktop/release
+```
+
+The packaged application smoke harness performs deterministic verification:
+1. **Argument validation**: Accepts `--dmg`, `--zip`, `--kind`, `--arch` (`x64` or `arm64`), `--release-dir`, and `--timeout-ms`. Validates mutually exclusive options and platform constraints.
+2. **Temporary isolation**: Stages DMGs by mounting with `hdiutil attach -nobrowse -readonly`, copying the `.app` bundle via `ditto` to a temporary directory in `os.tmpdir()`, unmounting the DMG, and extracting ZIPs into an isolated temporary folder. Never installs globally.
+3. **Code signature enforcement**: Executes `codesign --verify --deep --strict` on the staged `.app` bundle before launch. Missing binaries or invalid code signatures immediately fail staging.
+4. **Lifecycle and persistence protocol**:
+   - **Session 1 (Creation)**: Launches the staged binary with an isolated temporary `--user-data-dir` profile and loopback CDP debugging port. Initializes the workspace, creates a company (`Acme Packaging Corp`), and creates a local job application (`Packaged Smoke Reliability Engineer`). Terminates the process cleanly.
+   - **Session 2 (Relaunch Persistence Verification)**: Relaunches the application using the *same* user data profile. Connects via CDP DevTools WebSocket to query `bootstrap` and `application.get`, confirming the job application record persisted accurately across restarts.
+5. **Clean teardown**: Process trees and all temporary staging/profile directories are automatically removed upon completion or failure using `collectCleanupErrors`.
+
 ## CI matrix
 
 Every pull request and main-branch push runs target-native jobs for:

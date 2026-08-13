@@ -32,6 +32,7 @@ import {
 import { assessReleaseSecrets } from './validate-release-secrets.mjs';
 import { verifyFuseBinary } from './verify-electron-fuses.mjs';
 import { signingStatus } from './write-signing-status.mjs';
+import { parseSmokeArgs } from './smoke-packaged-app.mjs';
 
 const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'outreachr-release-script-test-'));
 try {
@@ -719,6 +720,35 @@ try {
     { allowFailure: true },
   );
   assert.notEqual(collisionResult.code, 0, 'artifact basename collisions must be rejected');
+
+  // Packaged application smoke script self-tests: argument validation, isolation, and persistence protocol assertions
+  assert.deepEqual(
+    parseSmokeArgs(['--dmg', '--release-dir', temporaryRoot, '--timeout-ms', '60000']),
+    {
+      releaseDir: path.resolve(temporaryRoot),
+      timeoutMs: 60000,
+      kind: 'dmg',
+      arch: undefined,
+    },
+  );
+  assert.deepEqual(parseSmokeArgs(['--zip', '--arch', 'arm64']), {
+    releaseDir: path.resolve(path.join(repoRoot, 'apps', 'desktop', 'release')),
+    timeoutMs: 120000,
+    kind: 'zip',
+    arch: 'arm64',
+  });
+  assert.throws(
+    () => parseSmokeArgs(['--dmg', '--zip']),
+    /Cannot specify both --dmg and --zip/,
+  );
+  assert.throws(
+    () => parseSmokeArgs(['--arch', 'riscv64']),
+    /Invalid architecture "riscv64"/,
+  );
+  assert.throws(
+    () => parseSmokeArgs(['--timeout-ms', 'invalid']),
+    /Invalid --timeout-ms value/,
+  );
 
   console.log(
     'Release-script self-test passed: command portability, cleanup-error preservation, deterministic NSIS uninstall, active dependency metadata, Electron fuse enforcement, optional/partial signing policy, trust disclosures, pinned seed integrity, checksums, tamper/path safety, all six release bundles, complete attestation coverage, draft-asset comparison, and collision rejection.',
