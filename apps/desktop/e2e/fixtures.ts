@@ -18,6 +18,7 @@ interface DesktopFixtures {
 }
 
 const desktopRoot = resolve(import.meta.dirname, '..');
+const investorSeedPath = resolve(desktopRoot, '../../resources/Outreachr_Investor_Seed.sqlite');
 
 export const test = base.extend<DesktopFixtures>({
   dataDirectory: async ({}, provide) => {
@@ -94,6 +95,34 @@ export const test = base.extend<DesktopFixtures>({
     }
     await page.setViewportSize({ width: 1440, height: 940 });
     await page.waitForLoadState('domcontentloaded');
+
+    const bootstrapSelector = '.onboarding-shell, .job-setup-shell, .app-shell, .error-screen';
+    try {
+      await page.waitForSelector(bootstrapSelector, {
+        state: 'visible',
+        timeout: 60_000,
+      });
+    } catch (error) {
+      await throwBootstrapDiagnosticError(
+        page,
+        startupLogs,
+        'Timed out waiting for renderer bootstrap readiness (expected .onboarding-shell, .app-shell, or .error-screen)',
+        error,
+      );
+    }
+
+    const isErrorScreenVisible = await page
+      .locator('.error-screen')
+      .isVisible()
+      .catch(() => false);
+    if (isErrorScreenVisible) {
+      await throwBootstrapDiagnosticError(
+        page,
+        startupLogs,
+        'Renderer displayed error screen during bootstrap',
+      );
+    }
+
     await provide(page);
   },
 
@@ -108,6 +137,85 @@ export const test = base.extend<DesktopFixtures>({
 });
 
 export { expect };
+async function getSanitizedRendererState(page: Page): Promise<string> {
+  try {
+    const state = await page.evaluate(() => {
+      const getShellStatus = (selector: string) => {
+        const el = document.querySelector(selector);
+        if (!el) return 'absent';
+        const style = window.getComputedStyle(el);
+        const isVisible =
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          style.opacity !== '0';
+        return isVisible ? 'visible' : 'hidden';
+      };
+
+      const shells = {
+        loadingScreen: getShellStatus('.loading-screen'),
+        onboardingShell: getShellStatus('.onboarding-shell'),
+        jobSetupShell: getShellStatus('.job-setup-shell'),
+        appShell: getShellStatus('.app-shell'),
+        errorScreen: getShellStatus('.error-screen'),
+      };
+      const errorEl = document.querySelector('.error-screen');
+      const rawMsg = errorEl
+        ? errorEl.querySelector('p')?.textContent?.trim() || errorEl.textContent?.trim()
+        : null;
+
+      const sanitizedMsg = rawMsg
+        ? rawMsg
+            .replace(/[a-zA-Z0-9_-]{20,}/g, '[REDACTED_KEY]')
+            .slice(0, 300)
+        : null;
+      return {
+        url: window.location.href,
+        readyState: document.readyState,
+        shells,
+        errorMessage: sanitizedMsg,
+      };
+    });
+    const lines: string[] = [
+      `URL: ${state.url}`,
+      `ReadyState: ${state.readyState}`,
+      `Shells: loading-screen=${state.shells.loadingScreen}, onboarding-shell=${state.shells.onboardingShell}, job-setup-shell=${state.shells.jobSetupShell}, app-shell=${state.shells.appShell}, error-screen=${state.shells.errorScreen}`,
+    ];
+    if (state.errorMessage) {
+      lines.push(`Error message: ${state.errorMessage}`);
+    }
+    return lines.join('\n');
+  } catch (evalError) {
+    return `Could not evaluate renderer state: ${evalError instanceof Error ? evalError.message : String(evalError)}`;
+  }
+}
+async function throwBootstrapDiagnosticError(
+  page: Page,
+  startupLogs: string[],
+  reason: string,
+  cause?: unknown,
+): Promise<never> {
+  const rendererState = await getSanitizedRendererState(page);
+  const stageLines = startupLogs
+    .join('')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.includes('[outreachr-startup]'));
+
+  const stageDiagnostics =
+    stageLines.length > 0
+      ? stageLines.join('\n')
+      : startupLogs.join('').trim() || 'No process startup logs were captured.';
+
+  const message = [
+    `Electron renderer bootstrap failure: ${reason}`,
+    '--- Sanitized Renderer State ---',
+    rendererState,
+    '--- OUTREACHR_STARTUP_DIAGNOSTICS Stage Lines ---',
+    stageDiagnostics,
+  ].join('\n');
+
+  throw new Error(message, { cause });
+}
 
 export async function attachScreenshot(
   page: Page,
@@ -155,6 +263,32 @@ export async function connectGoogleRelationshipSync(page: Page): Promise<void> {
 }
 
 export async function completeOnboarding(page: Page): Promise<void> {
+  if (await page.getByRole('navigation', { name: 'Primary navigation' }).isVisible().catch(() => false)) {
+    await page.evaluate(async (path) => {
+      await window.outreachr.command('data.importSeed', { path });
+    }, investorSeedPath);
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    return;
+  }
+
+  const setupHeading = page.getByRole('heading', { name: 'Set up your job search' });
+  if (await setupHeading.isVisible().catch(() => false)) {
+    await page.getByLabel('Your name').fill('Ada Founder');
+    await page.getByLabel('Primary email').fill('ada@local.test');
+    await page.getByLabel('Stage 1 name').fill('Applied');
+    await page.getByLabel('Stage 2 name').fill('Interviewing');
+    await page.getByRole('button', { name: 'Create local workspace' }).click();
+    await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
+
+    await page.evaluate(async (path) => {
+      await window.outreachr.command('data.importSeed', { path });
+    }, investorSeedPath);
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+    return;
+  }
+
   await expect(page.getByRole('heading', { name: 'Who is running this round?' })).toBeVisible();
   await page.getByLabel('Your name').fill('Ada Founder');
   await page.getByLabel('Work email').fill('ada@local.test');
@@ -190,7 +324,11 @@ export async function completeOnboarding(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Create local workspace' }).click();
 
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Up next' })).toBeVisible();
+  await page.evaluate(async (path) => {
+    await window.outreachr.command('data.importSeed', { path });
+  }, investorSeedPath);
+  await page.reload();
+  await page.waitForLoadState('domcontentloaded');
 }
 
 export async function navigate(page: Page, label: string): Promise<void> {
