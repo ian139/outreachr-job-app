@@ -103,7 +103,7 @@ test.describe('Job Application Inbox & Mail Reader', () => {
 
     // 11. Selection Cancellation / Stale Ignore
     // Click slow thread, then immediately click plain text thread; active view must show plain text
-    await page.getByRole('button', { name: /Slow Responding Thread/ }).click();
+    await page.getByRole('button', { name: /Slow Recruiter Response Thread/ }).click();
     await page.getByRole('button', { name: /Senior Software Engineer Interview/ }).click();
 
     await expect(messageDetail).toContainText(

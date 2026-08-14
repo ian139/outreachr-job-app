@@ -286,13 +286,13 @@ function gmailThread(id: string): Record<string, unknown> {
           id: 'msg-stale',
           threadId: 'thread-stale',
           internalDate: '1736294400000',
-          snippet: 'Slow Responding Thread',
+          snippet: 'Slow Recruiter Response Thread',
           payload: {
             mimeType: 'text/plain',
             headers: [
-              { name: 'From', value: 'Slow Server <slow@acme.test>' },
+              { name: 'From', value: 'Acme Recruiter <recruiting@acme.test>' },
               { name: 'To', value: `Ada Candidate <${googleAccount}>` },
-              { name: 'Subject', value: 'Slow Responding Thread' },
+              { name: 'Subject', value: 'Slow Recruiter Response Thread' },
               { name: 'Date', value: 'Wed, 08 Jan 2026 12:00:00 GMT' },
               { name: 'Message-ID', value: '<slow@acme.test>' },
             ],
@@ -444,7 +444,7 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
           { id: 'thread-empty', snippet: '' },
           { id: 'thread-error', snippet: 'Provider Error Failure' },
           { id: 'thread-truncated', snippet: 'Diagnostic Export Attachment' },
-          { id: 'thread-stale', snippet: 'Slow Responding Thread' },
+          { id: 'thread-stale', snippet: 'Slow Recruiter Response Thread' },
         ],
         nextPageToken: 'thread-page-two',
       });
