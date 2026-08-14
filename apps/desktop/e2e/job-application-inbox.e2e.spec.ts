@@ -103,10 +103,14 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     });
 
     // 11. Selection Cancellation / Stale Ignore
-    // Click slow thread, then immediately click plain text thread; active view must show plain text
+    // Mobile layouts hide the thread list while detail is open, so return to
+    // the list before each rapid selection when that control is visible.
+    const backToInbox = page.getByRole('button', { name: 'Back to inbox' });
+    if (await backToInbox.isVisible()) await backToInbox.click();
     await page
       .getByRole('button', { name: /Technical Interview Code Sample and Compensation Table/ })
       .click();
+    if (await backToInbox.isVisible()) await backToInbox.click();
     await page.getByRole('button', { name: /Senior Software Engineer Interview/ }).click();
 
     await expect(messageDetail).toContainText(
