@@ -459,8 +459,13 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
       ) {
         return HttpResponse.json({ error: 'Internal provider failure' }, { status: 500 });
       }
-      if (threadId === 'thread-stale') {
-        await new Promise((resolve) => setTimeout(resolve, 800));
+      if (
+        threadId === 'thread-pre-table' &&
+        new URL(request.url).searchParams.get('format') !== 'metadata'
+      ) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setTimeout(resolve, 800);
+        await promise;
       }
       const data = gmailThread(threadId);
       if (!data.id) return HttpResponse.json({ error: 'Thread not found' }, { status: 404 });
