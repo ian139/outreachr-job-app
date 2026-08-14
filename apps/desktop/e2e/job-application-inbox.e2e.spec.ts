@@ -12,6 +12,7 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     page,
     rendererErrors,
   }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await setupJobWorkspace(page);
     await connectGoogleRelationshipSync(page);
     await navigate(page, 'Inbox');
