@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ApplicationDetail } from '../../../../shared/contracts';
 import { Button, Dialog, TextField } from '../ui';
 import { useWorkspace } from '../../state/WorkspaceContext';
@@ -24,7 +24,6 @@ export function LinkContactModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreateContact, setShowCreateContact] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
 
   const contacts = data?.contacts ?? [];
 
@@ -69,10 +68,11 @@ export function LinkContactModal({
               Cancel
             </Button>
             <Button
-              type="button"
+              type="submit"
+              form="link-contact-form"
               tone="primary"
               loading={submitting}
-              onClick={() => formRef.current?.requestSubmit()}
+              disabled={!contactId}
             >
               Link contact
             </Button>
@@ -80,7 +80,6 @@ export function LinkContactModal({
         }
       >
         <form
-          ref={formRef}
           id="link-contact-form"
           onSubmit={handleSubmit}
           style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}

@@ -63,7 +63,9 @@ test.describe('Job Application Lifecycle & Record Management', () => {
       .selectOption({ label: 'Jane Recruiter (Talent Partner) - jane.recruiter@techcorp.test' });
 
     await page.getByLabel('Primary point of contact for this application').check();
-    await page.getByRole('button', { name: 'Link contact', exact: true }).click();
+    const linkContactButton = page.getByRole('button', { name: 'Link contact', exact: true });
+    await expect(linkContactButton).toBeEnabled();
+    await linkContactButton.click();
     await expect(page.getByRole('dialog', { name: 'Link contact' })).toHaveCount(0, {
       timeout: 45_000,
     });
