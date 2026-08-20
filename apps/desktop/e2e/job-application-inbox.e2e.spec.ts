@@ -30,9 +30,7 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     await loadMoreButton.click();
 
     // 2. Select Plain Text Thread
-    await page
-      .getByRole('button', { name: /Senior Software Engineer Interview/ })
-      .click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Senior Software Engineer Interview/ }).click();
     const messageDetail = page.getByRole('main', { name: 'Thread content' });
     await expect(messageDetail).toBeVisible();
     await expect(messageDetail).toContainText(
@@ -64,7 +62,7 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     expect(await messageDetail.locator('img').count()).toBe(0);
 
     // 4. Select Sanitized HTML Thread & Verify DOMPurify Strips Script/Style
-    await page.getByRole('button', { name: /Job Offer Details/ }).click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Job Offer Details/ }).click();
     await expect(messageDetail).toBeVisible();
     await expect(messageDetail).toContainText('Welcome to Acme Corp!');
     await expect(messageDetail).toContainText('Remote image omitted: Acme logo');
@@ -78,38 +76,32 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     );
 
     // 5. Select Quoted Reply Thread & Verify <blockquote> Element
-    await page
-      .getByRole('button', { name: /Re: Application Status Update/ })
-      .click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Re: Application Status Update/ }).click();
     await expect(messageDetail).toBeVisible();
     await expect(messageDetail.locator('blockquote')).toBeVisible();
 
     // 6. Select Long URL Thread & Verify Horizontal Scroll Bounds
-    await page
-      .getByRole('button', { name: /Application Portal Access/ })
-      .click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Application Portal Access/ }).click();
     await expect(messageDetail).toBeVisible();
     await assertNoHorizontalScroll(page);
 
     // 7. Select Pre/Table Thread & Verify Internal Scroll Container
     await page
       .getByRole('button', { name: /Technical Interview Code Sample and Compensation Table/ })
-      .click({ noWaitAfter: true });
+      .click();
     await expect(messageDetail.locator('pre')).toBeVisible();
     await expect(messageDetail.locator('table')).toBeVisible();
 
     // 8. Select Empty Body Thread
-    await page.getByRole('button', { name: /Blank Message Test/ }).click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Blank Message Test/ }).click();
     await expect(page.getByText('(No text content)')).toBeVisible();
 
     // 9. Select Provider Error Thread
-    await page.getByRole('button', { name: /Provider Error Failure/ }).click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Provider Error Failure/ }).click();
     await expect(page.getByRole('alert')).toContainText('Provider returned HTTP 500');
 
     // 10. Select Provider Truncated Thread
-    await page
-      .getByRole('button', { name: /Large Diagnostic Export Attachment/ })
-      .click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Large Diagnostic Export Attachment/ }).click();
     await expect(messageDetail).toContainText('Message content truncated by provider', {
       timeout: 45_000,
     });
@@ -121,11 +113,9 @@ test.describe('Job Application Inbox & Mail Reader', () => {
     if (await backToInbox.isVisible()) await backToInbox.click();
     await page
       .getByRole('button', { name: /Technical Interview Code Sample and Compensation Table/ })
-      .click({ noWaitAfter: true });
+      .click();
     if (await backToInbox.isVisible()) await backToInbox.click();
-    await page
-      .getByRole('button', { name: /Senior Software Engineer Interview/ })
-      .click({ noWaitAfter: true });
+    await page.getByRole('button', { name: /Senior Software Engineer Interview/ }).click();
 
     await expect(messageDetail).toContainText(
       'Plain text body content for senior software engineer interview.',

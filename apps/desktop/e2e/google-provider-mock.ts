@@ -262,8 +262,6 @@ function gmailThread(id: string): Record<string, unknown> {
           threadId: 'thread-truncated',
           internalDate: '1736208000000',
           snippet: 'Diagnostic Export Attachment',
-          providerTruncated: true,
-          truncationReason: 'size_limit',
           payload: {
             mimeType: 'text/plain',
             headers: [
@@ -273,7 +271,7 @@ function gmailThread(id: string): Record<string, unknown> {
               { name: 'Date', value: 'Tue, 07 Jan 2026 12:00:00 GMT' },
               { name: 'Message-ID', value: '<truncated@acme.test>' },
             ],
-            body: { data: Buffer.alloc(1_048_577, 65).toString('base64url') },
+            body: { attachmentId: 'truncated-body' },
           },
         },
       ],
@@ -476,6 +474,14 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
       state.gmailMetadataIds.push(messageId);
       return HttpResponse.json(gmailMessage(messageId));
     }),
+    http.get(
+      `${baseUrl}/gmail/v1/users/me/messages/:messageId/attachments/:attachmentId`,
+      ({ request }) => {
+        const denied = requireAccessToken(request);
+        if (denied) return denied;
+        return HttpResponse.json({ error: 'Attachment exceeds provider limit' }, { status: 500 });
+      },
+    ),
     http.post(`${baseUrl}/gmail/v1/users/me/messages/send`, async ({ request }) => {
       const denied = requireAccessToken(request);
       if (denied) return denied;
