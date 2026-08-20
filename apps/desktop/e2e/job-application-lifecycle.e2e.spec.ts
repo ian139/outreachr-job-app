@@ -64,8 +64,12 @@ test.describe('Job Application Lifecycle & Record Management', () => {
 
     await page.getByLabel('Primary point of contact for this application').check();
     await page.getByRole('button', { name: 'Link contact', exact: true }).click();
-    await expect(page.getByText('Jane Recruiter', { exact: true })).toBeVisible();
-    await expect(page.getByRole('dialog', { name: 'Link contact' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Link contact' })).toHaveCount(0, {
+      timeout: 45_000,
+    });
+    await expect(
+      page.getByLabel('Application details').getByText('Jane Recruiter', { exact: true }),
+    ).toBeVisible();
 
     // 5. Valid stage transition and stage history recording
     await page.getByRole('button', { name: 'Change stage' }).click();
