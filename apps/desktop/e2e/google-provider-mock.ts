@@ -463,9 +463,7 @@ function mockHandlers(baseUrl: string, state: GoogleProviderMockState): RequestH
         threadId === 'thread-pre-table' &&
         new URL(request.url).searchParams.get('format') !== 'metadata'
       ) {
-        const { promise, resolve } = Promise.withResolvers<void>();
-        setTimeout(resolve, 800);
-        await promise;
+        await new Promise<void>((resolve) => setTimeout(resolve, 800));
       }
       const data = gmailThread(threadId);
       if (!data.id) return HttpResponse.json({ error: 'Thread not found' }, { status: 404 });
