@@ -308,7 +308,6 @@ function validateGraphContinuation(
   allowedPaths: readonly string[],
   seenUrls: Set<string>,
 ): URL {
-  const base = new URL(graphBaseUrl);
   const url = microsoftMailPageUrl(nextLink, graphBaseUrl, operation, allowedPaths);
   const urlKey = url.toString();
   if (seenUrls.has(urlKey)) {
