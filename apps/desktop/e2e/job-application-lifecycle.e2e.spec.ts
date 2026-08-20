@@ -58,6 +58,7 @@ test.describe('Job Application Lifecycle & Record Management', () => {
     await page.getByLabel('Title / Role').fill('Talent Partner');
     await page.getByLabel('Email address').fill('jane.recruiter@techcorp.test');
     await page.getByRole('button', { name: 'Create contact' }).click();
+    await expect(page.getByRole('dialog', { name: 'New contact' })).toHaveCount(0);
     await page
       .getByLabel('Select contact')
       .selectOption({ label: 'Jane Recruiter (Talent Partner) - jane.recruiter@techcorp.test' });
