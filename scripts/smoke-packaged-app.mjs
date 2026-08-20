@@ -411,12 +411,13 @@ export async function stageDistributions(root, options = {}, deps = {}) {
   const findUniqueAppExec = deps.uniqueAppExecutable ?? uniqueAppExecutable;
   const fileSystem = deps.fs ?? fs;
   const remTree = deps.removeTree ?? removeTree;
+  const platform = deps.platform ?? process.platform;
 
   const files = await walk(root);
   const staged = [];
 
   try {
-    if (process.platform === 'darwin') {
+    if (platform === 'darwin') {
       const stageKinds = requestedKind
         ? [requestedKind]
         : explicitDmgPath
@@ -567,7 +568,7 @@ export async function stageDistributions(root, options = {}, deps = {}) {
       return staged;
     }
 
-    if (process.platform === 'win32') {
+    if (platform === 'win32') {
       let installers = files.filter(
         (file) =>
           file.toLowerCase().endsWith('.exe') &&
@@ -615,7 +616,7 @@ export async function stageDistributions(root, options = {}, deps = {}) {
       return staged;
     }
 
-    if (process.platform === 'linux') {
+    if (platform === 'linux') {
       const stageKinds = requestedKind ? [requestedKind] : ['appimage', 'deb'];
 
       if (stageKinds.includes('appimage')) {
@@ -718,7 +719,7 @@ export async function stageDistributions(root, options = {}, deps = {}) {
       }
       return staged;
     }
-    throw new Error(`Unsupported smoke-test platform ${process.platform}`);
+    throw new Error(`Unsupported smoke-test platform ${platform}`);
   } catch (error) {
     throwWithCleanup(error, await cleanupDistributions(staged, deps), 'Distribution staging');
   }

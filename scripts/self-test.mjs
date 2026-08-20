@@ -885,6 +885,7 @@ try {
     // Test 1: Explicit artifact path selection without directory searching or ignoring path
     const stagedExplicit = [];
     const fakeDepsExplicit = {
+      platform: 'darwin',
       walkFiles: async () => [], // Empty release dir proves explicit path is not searching dir
       mkdtemp: async (prefix) => path.join(temporaryRoot, path.basename(prefix) + '123'),
       run: async (cmd, args) => {
@@ -924,6 +925,7 @@ try {
     ];
     const attachedTargets = [];
     const fakeDepsMultiArch = {
+      platform: 'darwin',
       walkFiles: async () => multiArchFiles,
       mkdtemp: async (prefix) => path.join(temporaryRoot, path.basename(prefix) + '456'),
       run: async (cmd, args) => {
