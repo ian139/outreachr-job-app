@@ -167,8 +167,7 @@ interface JobRelevantContinuationState {
 
 function graphThreadId(message: GraphMessageJson): string | undefined {
   const threadId =
-    (typeof message.conversationId === 'string' && message.conversationId.trim()) ||
-    message.id;
+    (typeof message.conversationId === 'string' && message.conversationId.trim()) || message.id;
   return threadId || undefined;
 }
 
@@ -250,12 +249,7 @@ function decodeJobRelevantContinuation(
     });
   }
   const state = parsed as Record<string, unknown>;
-  if (
-    state.v !== 1 ||
-    state.a !== accountEmail ||
-    state.q !== query ||
-    state.p !== pageSize
-  ) {
+  if (state.v !== 1 || state.a !== accountEmail || state.q !== query || state.p !== pageSize) {
     throw new ConnectorError({
       provider: 'microsoft',
       operation: 'graph.threads.list',
@@ -277,9 +271,7 @@ function decodeJobRelevantContinuation(
   };
   const url = boundedUrl(state.u);
   const emittedThreadIds = Array.isArray(state.t)
-    ? state.t.filter(
-        (value): value is string => typeof value === 'string' && value.length <= 4096,
-      )
+    ? state.t.filter((value): value is string => typeof value === 'string' && value.length <= 4096)
     : [];
   if (emittedThreadIds.length > MAX_FILTER_CONTINUATION_THREAD_IDS) {
     throw new ConnectorError({
@@ -302,11 +294,7 @@ function decodeJobRelevantContinuation(
 function normalizeThreadQuery(query: string | undefined): string {
   const trimmed = (query ?? '').trim();
   if (!trimmed) return '';
-  return trimmed
-    .replace(/["\\]/g, ' ')
-    .split(/\s+/u)
-    .filter(Boolean)
-    .join(' ');
+  return trimmed.replace(/["\\]/g, ' ').split(/\s+/u).filter(Boolean).join(' ');
 }
 
 /**
@@ -903,12 +891,7 @@ export class MicrosoftConnector
 
     let state: JobRelevantContinuationState;
     if (input.pageToken) {
-      state = decodeJobRelevantContinuation(
-        input.pageToken,
-        input.accountEmail,
-        query,
-        pageSize,
-      );
+      state = decodeJobRelevantContinuation(input.pageToken, input.accountEmail, query, pageSize);
     } else {
       state = {
         v: 1,
@@ -943,11 +926,7 @@ export class MicrosoftConnector
     }
 
     let scanned = 0;
-    while (
-      scanned < MAX_LOCAL_FILTER_SCAN_PAGES &&
-      threadMap.size < pageSize &&
-      url
-    ) {
+    while (scanned < MAX_LOCAL_FILTER_SCAN_PAGES && threadMap.size < pageSize && url) {
       const page = await this.#fetchGraphThreadPage(url, input.signal);
       const pageNextLink = page['@odata.nextLink'];
       let overflow = false;

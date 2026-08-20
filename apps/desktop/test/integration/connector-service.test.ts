@@ -184,7 +184,8 @@ describe('ConnectorService with MSW provider boundaries', () => {
     );
   }
 
-  it('uses PKCE without a secret, stores encrypted OAuth tokens, and reports connected state', async () => {    successfulGoogleHandlers();
+  it('uses PKCE without a secret, stores encrypted OAuth tokens, and reports connected state', async () => {
+    successfulGoogleHandlers();
     const { vault, connector, openExternal } = await fixture();
 
     const configured = await connector.configure({

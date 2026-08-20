@@ -214,7 +214,6 @@ describe('desktop OAuth and PKCE', () => {
     ).resolves.toMatchObject({ accessToken: 'google-refreshed' });
   });
 
-
   it('refreshes tokens and maps OAuth endpoint errors', async () => {
     server.use(
       http.post(tokenEndpoint('google'), async ({ request }) => {

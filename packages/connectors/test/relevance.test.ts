@@ -17,7 +17,7 @@ type Fixture = {
 const fixtures: Fixture[] = [
   {
     name: 'NBA schedule',
-    subject: 'NBA schedule: this week\'s games',
+    subject: "NBA schedule: this week's games",
     fromName: 'NBA Daily',
     fromAddress: 'updates@nba.example',
     relevant: false,
@@ -252,9 +252,12 @@ const fixtures: Fixture[] = [
 ];
 
 describe('job-relevant metadata classifier', () => {
-  it.each(fixtures)('$name => $relevant', ({ subject, fromName, fromAddress, bodyPreview, relevant }) => {
-    expect(isJobRelevantMailMetadata(subject, fromName, fromAddress, bodyPreview)).toBe(relevant);
-  });
+  it.each(fixtures)(
+    '$name => $relevant',
+    ({ subject, fromName, fromAddress, bodyPreview, relevant }) => {
+      expect(isJobRelevantMailMetadata(subject, fromName, fromAddress, bodyPreview)).toBe(relevant);
+    },
+  );
 
   it('publishes a Gmail query with corroboration and scoped negative exclusions', () => {
     expect(JOB_RELEVANT_GMAIL_QUERY).toContain('"application status"');
@@ -282,8 +285,8 @@ describe('job-relevant metadata classifier', () => {
     // the last OR branch.
     expect(JOB_RELEVANT_GMAIL_QUERY.startsWith('(')).toBe(true);
     expect(JOB_RELEVANT_GMAIL_QUERY.endsWith(')')).toBe(true);
-    expect(
-      composeGmailThreadQuery('job-relevant', 'application'),
-    ).toBe(`${JOB_RELEVANT_GMAIL_QUERY} "application"`);
+    expect(composeGmailThreadQuery('job-relevant', 'application')).toBe(
+      `${JOB_RELEVANT_GMAIL_QUERY} "application"`,
+    );
   });
 });

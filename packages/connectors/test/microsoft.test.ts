@@ -737,8 +737,7 @@ describe('Microsoft Graph mail and calendar connector', () => {
         }
         return HttpResponse.json({
           value: page1,
-          '@odata.nextLink':
-            'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=dense-page-2',
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=dense-page-2',
         });
       }),
     );
@@ -836,8 +835,7 @@ describe('Microsoft Graph mail and calendar connector', () => {
         }
         return HttpResponse.json({
           value: dense,
-          '@odata.nextLink':
-            'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=next1',
+          '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=next1',
         });
       }),
     );
@@ -875,10 +873,26 @@ describe('Microsoft Graph mail and calendar connector', () => {
       ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
     };
 
-    await expectRejected(tamper((state) => { state.a = 'other@example.com'; }));
-    await expectRejected(tamper((state) => { state.q = 'offer'; }));
-    await expectRejected(tamper((state) => { state.p = 20; }));
-    await expectRejected(tamper((state) => { state.v = 2; }));
+    await expectRejected(
+      tamper((state) => {
+        state.a = 'other@example.com';
+      }),
+    );
+    await expectRejected(
+      tamper((state) => {
+        state.q = 'offer';
+      }),
+    );
+    await expectRejected(
+      tamper((state) => {
+        state.p = 20;
+      }),
+    );
+    await expectRejected(
+      tamper((state) => {
+        state.v = 2;
+      }),
+    );
     await expectRejected('not-a-valid-token');
 
     // Oversized tokens are rejected by the mailbox page-token validation.

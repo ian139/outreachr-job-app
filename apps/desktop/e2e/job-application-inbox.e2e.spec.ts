@@ -50,8 +50,12 @@ test.describe('Job Application Inbox & Mail Reader', () => {
       }),
     ).toBeVisible();
     await expect(messageDetail.getByRole('list')).toBeVisible();
-    await expect(messageDetail.locator('blockquote')).toContainText('Please bring questions for the team.');
-    await expect(messageDetail.locator('pre code')).toContainText('const interviewConfirmed = true;');
+    await expect(messageDetail.locator('blockquote')).toContainText(
+      'Please bring questions for the team.',
+    );
+    await expect(messageDetail.locator('pre code')).toContainText(
+      'const interviewConfirmed = true;',
+    );
     await expect(
       messageDetail.getByRole('link', { name: 'Choose an interview slot' }),
     ).toHaveAttribute('href', 'https://jobs.techcorp.test/interview');

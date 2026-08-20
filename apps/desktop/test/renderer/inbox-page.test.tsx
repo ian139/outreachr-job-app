@@ -167,12 +167,7 @@ function setupInboxFixture() {
       if (!query) return { threads: all, nextCursor: 'cursor_page_2' };
       const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
       const filtered = all.filter((t) => {
-        const haystack = [
-          t.subject,
-          t.snippet ?? '',
-          ...t.participants,
-          t.accountEmail,
-        ]
+        const haystack = [t.subject, t.snippet ?? '', ...t.participants, t.accountEmail]
           .join(' ')
           .toLowerCase();
         return tokens.every((token) => haystack.includes(token));
@@ -309,9 +304,7 @@ describe('InboxPage component & messaging behavior', () => {
           .join(' ')
           .toLowerCase();
         return {
-          threads: tokens.every((token) => haystack.includes(token))
-            ? [crossFieldThread]
-            : [],
+          threads: tokens.every((token) => haystack.includes(token)) ? [crossFieldThread] : [],
           nextCursor: null,
         };
       },
@@ -571,7 +564,9 @@ describe('InboxPage component & messaging behavior', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'View plain text' }));
     expect(
-      screen.getByText((_, element) => element?.tagName === 'PRE' && element.textContent === markdownOnlyBody),
+      screen.getByText(
+        (_, element) => element?.tagName === 'PRE' && element.textContent === markdownOnlyBody,
+      ),
     ).toBeInTheDocument();
   });
 

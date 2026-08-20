@@ -297,7 +297,8 @@ export async function exchangeAuthorizationCode(
     redirect_uri: input.redirectUri,
     grant_type: 'authorization_code',
   });
-  if (input.provider === 'google' && input.clientSecret) body.set('client_secret', input.clientSecret);
+  if (input.provider === 'google' && input.clientSecret)
+    body.set('client_secret', input.clientSecret);
   return postToken(
     input.provider,
     input.fetch,
@@ -314,7 +315,8 @@ export async function refreshAccessToken(input: RefreshAccessTokenInput): Promis
     refresh_token: input.refreshToken,
     grant_type: 'refresh_token',
   });
-  if (input.provider === 'google' && input.clientSecret) body.set('client_secret', input.clientSecret);
+  if (input.provider === 'google' && input.clientSecret)
+    body.set('client_secret', input.clientSecret);
   if (input.scopes?.length) body.set('scope', input.scopes.join(' '));
   return postToken(
     input.provider,

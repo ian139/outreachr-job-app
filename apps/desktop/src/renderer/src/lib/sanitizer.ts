@@ -131,7 +131,9 @@ function escapeHtmlText(value: string): string {
 }
 
 function imageOmission(element: ParsedElement): string {
-  const alt = element.attrs.find((attribute) => attribute.name.toLowerCase() === 'alt')?.value?.trim();
+  const alt = element.attrs
+    .find((attribute) => attribute.name.toLowerCase() === 'alt')
+    ?.value?.trim();
   const text = alt ? `Remote image omitted: ${alt}` : 'Remote image omitted';
   return `<aside aria-label="Remote image omitted">${escapeHtmlText(text)}</aside>`;
 }

@@ -227,10 +227,7 @@ const ALL_SUBJECT_TERMS: readonly string[] = [
 ];
 
 /** All sender terms (recruiting + weak), for corroboration. */
-const ALL_SENDER_TERMS: readonly string[] = [
-  ...RECRUITING_SENDER_TERMS,
-  ...WEAK_SENDER_TERMS,
-];
+const ALL_SENDER_TERMS: readonly string[] = [...RECRUITING_SENDER_TERMS, ...WEAK_SENDER_TERMS];
 
 function gmailTerm(term: string): string {
   return /\s/u.test(term) ? `"${term}"` : term;
@@ -338,7 +335,13 @@ export const PROMOTIONAL_CORROBORATION_MATCHER = compileTermMatcherList(
 );
 
 function compileTermMatcherList(terms: readonly string[]): RegExp {
-  return new RegExp(terms.map(compileTermMatcher).map((matcher) => matcher.source).join('|'), 'iu');
+  return new RegExp(
+    terms
+      .map(compileTermMatcher)
+      .map((matcher) => matcher.source)
+      .join('|'),
+    'iu',
+  );
 }
 
 function matchAny(text: string, matcher: RegExp): boolean {
@@ -382,7 +385,10 @@ export function isJobRelevantMailMetadata(
   }
 
   // 4. Recruiting identity (subject or sender).
-  if (matchAny(subjectText, RECRUITING_SUBJECT_MATCHER) || matchAny(senderText, RECRUITING_SENDER_MATCHER)) {
+  if (
+    matchAny(subjectText, RECRUITING_SUBJECT_MATCHER) ||
+    matchAny(senderText, RECRUITING_SENDER_MATCHER)
+  ) {
     return true;
   }
 
